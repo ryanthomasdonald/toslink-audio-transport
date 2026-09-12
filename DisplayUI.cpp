@@ -1,130 +1,141 @@
 #include "DisplayUI.h"
+#include "LibraryMenu.h"
 #include "AudioEngine.h"
 #include <Wire.h>
 #include <SD.h>
 
-#define TFT_DC      8
-#define TFT_CS     10
-#define TFT_RST     9
+#define TFT_DC 8
+#define TFT_CS 10
+#define TFT_RST 9
 #define FT6336U_ADDR 0x38
 
 ST7796_t3 tft = ST7796_t3(TFT_CS, TFT_DC, TFT_RST);
 
+// Dynamic State Allocation State Tracker
+UIState currentUIState = STATE_PLAYER;
+
+// Global Memory Cache for Root Directory Scanning
+char artistList[LEVEL_ARTISTS][64];
+int totalArtists = 0;
+
 uint32_t lastUpdatedSecond = 999999;
 uint16_t lastProgressPixelWidth = 0;
 
-// Global coordinates linked back to header scopes to prevent variable shadowing
 uint16_t touchX = 0;
 uint16_t touchY = 0;
 
-const int pBarX = 198;       
-const int pBarY = 175;       
-const int pBarMaxWidth = 254; 
+const int pBarX = 198;
+const int pBarY = 175;
+const int pBarMaxWidth = 254;
 const int pBarHeight = 8;
 
+// Expanded to 5 items to cleanly encompass the new BROWSE trigger
 UI_Button transport[] = {
-  {15,  235, 100, 65, "PREV",  0x3186, false}, 
-  {130, 235, 100, 65, "PLAY",  0x03E0, false}, 
-  {245, 235, 100, 65, "STOP",  ST7735_RED, false}, 
-  {360, 235, 100, 65, "NEXT",  0x3186, false}  
+  { 10, 245, 85, 55, "PREV", 0x3186, false },
+  { 105, 245, 85, 55, "PLAY", 0x03E0, false },
+  { 200, 245, 85, 55, "STOP", ST7735_RED, false },
+  { 295, 245, 85, 55, "NEXT", 0x3186, false },
+  { 390, 245, 80, 55, "BROWSE", 0x5AAA, false }  // Indigo Blue UI Accent Button
 };
 
 void initDisplaySystem() {
   Wire.begin();
-  Wire.setClock(400000); 
+  Wire.setClock(400000);
   tft.init(320, 480);
   tft.invertDisplay(true);
-  tft.setRotation(1); 
+  tft.setRotation(1);
 }
 
 void resetProgressTrackers() {
   lastUpdatedSecond = 999999;
   lastProgressPixelWidth = 0;
-  tft.fillRect(pBarX, pBarY, pBarMaxWidth, pBarHeight, 0x2104); 
+  if (currentUIState == STATE_PLAYER) {
+    tft.fillRect(pBarX, pBarY, pBarMaxWidth, pBarHeight, 0x2104);
+  }
 }
 
 void updatePlayPauseButtonLabel(const char* newLabel, uint16_t newColor) {
   transport[1].label = newLabel;
   transport[1].color = newColor;
-  drawTransportButton(transport[1]);
+  if (currentUIState == STATE_PLAYER) {
+    drawTransportButton(transport[1]);
+  }
 }
 
 void drawAudioDashboard() {
-  tft.fillScreen(0x10A2); 
+  tft.fillScreen(0x10A2);
   tft.drawRoundRect(15, 15, 450, 200, 8, ST7735_WHITE);
-  
-  // Outer frame shifted exactly left to X = 22 to clear the offset bug
-  tft.drawRect(22, 25, 160, 160, 0x52AA); 
-  
-  tft.fillRect(pBarX, pBarY, pBarMaxWidth, pBarHeight, 0x2104); 
-  
-  for (int i = 0; i < 4; i++) drawTransportButton(transport[i]);
+  tft.drawRect(22, 25, 160, 160, 0x52AA);
+  tft.fillRect(pBarX, pBarY, pBarMaxWidth, pBarHeight, 0x2104);
+
+  for (int i = 0; i < 5; i++) drawTransportButton(transport[i]);
   drawAlbumArtwork();
 }
 
-// -----------------------------------------------------------------------------
-// 🖼️ HARDWARE-ACCELERATED BMP ARTWORK STREAMER (Direct Pass-Through)
-// Uses our adaptive header offset to lock centering, while passing raw data
-// straight to the display driver to let the hardware handle native color streams.
-// -----------------------------------------------------------------------------
 void drawAlbumArtwork() {
   String artPath = String(currentArtistFolder) + String(currentAlbumFolder) + "SSTP.bmp";
   File bmpFile = SD.open(artPath.c_str(), FILE_READ);
-  
   if (!bmpFile) {
     tft.fillRect(22, 25, 160, 160, 0x2104);
-    tft.setTextColor(0x7BEF); tft.setTextSize(1);
-    tft.setCursor(72, 105); tft.print("NO ARTWORK");
+    tft.setTextColor(0x7BEF);
+    tft.setTextSize(1);
+    tft.setCursor(72, 105);
+    tft.print("NO ARTWORK");
     return;
   }
 
-  // 🔎 DYNAMIC CHUNK PARSER:
-  // Extracts the exact starting byte address where the raw pixel matrix begins.
-  uint32_t pixelDataOffset = 54; 
+  uint32_t pixelDataOffset = 54;
   bmpFile.seek(10);
   bmpFile.read((uint8_t*)&pixelDataOffset, 4);
 
-  // Allocate proper 160-element array size to safely hold 320 bytes per row
-  uint16_t rowBuffer[160]; 
-  
+  uint16_t rowBuffer[160];
+
   for (int y = 159; y >= 0; y--) {
-    // Dynamic seek using the exact extracted data offset address
-    bmpFile.seek(pixelDataOffset + (y * 320)); 
+    bmpFile.seek(pixelDataOffset + (y * 320));
     int bytesRead = bmpFile.read((uint8_t*)rowBuffer, 320);
     if (bytesRead <= 0) break;
-    
-    // 🔄 BYPASS SWAP: The software byte swap has been removed. 
-    // We let tft.writeRect() stream the data natively to see if the colors correct themselves.
-    
-    // Inject pixel row precisely at centered X = 22 coordinate
     tft.writeRect(22, 25 + (159 - y), 160, 1, rowBuffer);
   }
-  
   bmpFile.close();
-  Serial.printf("Artwork Engine: Direct pass-through completed from byte: %lu\n", pixelDataOffset);
 }
 
 void updateTrackWindow(int trackNum, const char* trackTitle) {
-  tft.fillRect(198, 25, 258, 140, 0x10A2); 
+  if (currentUIState != STATE_PLAYER) return;  // Maintain screen isolation
+
+  tft.fillRect(198, 25, 258, 140, 0x10A2);
   resetProgressTrackers();
-  
-  String artistStr = String(currentArtistFolder); artistStr.replace("/", "");
-  String albumStr  = String(currentAlbumFolder);  albumStr.replace("/", "");
-  
+
+  String artistStr = String(currentArtistFolder);
+  artistStr.replace("/", "");
+
+  String albumStr = String(currentAlbumFolder);
+  albumStr.replace("/", "");
+
   tft.setTextSize(1);
-  tft.setTextColor(0x7BEF); 
-  tft.setCursor(198, 25); tft.print(artistStr.c_str());
-  tft.setCursor(198, 37); tft.print(albumStr.c_str());
-  
+  tft.setTextColor(0x7BEF);
+  tft.setCursor(198, 25);
+  tft.print(artistStr.c_str());
+  tft.setCursor(198, 37);
+  tft.print(albumStr.c_str());
+
   tft.setTextColor(ST7735_CYAN);
   tft.setTextSize(1);
   tft.setCursor(198, 60);
   tft.printf("TRACK %02d OF %02d", trackNum, totalTracks);
-  
+
   tft.setTextColor(ST7735_WHITE);
-  tft.setTextSize(2); 
-  tft.setCursor(198, 90); 
-  tft.print(trackTitle);
+  tft.setTextSize(2);
+  tft.setCursor(198, 90);
+
+  String cleanName = String(trackTitle);
+  if (cleanName.length() > 3) {
+    cleanName = cleanName.substring(3);
+  }
+  if (cleanName.endsWith(".wav") || cleanName.endsWith(".WAV")) {
+    cleanName = cleanName.substring(0, cleanName.length() - 4);
+  }
+
+  tft.print(cleanName.c_str());
 }
 
 void drawTransportButton(UI_Button btn) {
@@ -136,34 +147,40 @@ void drawTransportButton(UI_Button btn) {
     tft.drawRoundRect(btn.x, btn.y, btn.w, btn.h, 10, ST7735_WHITE);
     tft.setTextColor(ST7735_WHITE);
   }
-  tft.setTextSize(2);
-  int16_t x1, y1; uint16_t w, h;
+  tft.setTextSize(1);  // Drop text sizes slightly down to fit tighter buttons
+  if (strcmp(btn.label, "BROWSE") == 0) tft.setTextSize(1);
+  else tft.setTextSize(2);
+
+  int16_t x1, y1;
+  uint16_t w, h;
   tft.getTextBounds(btn.label, btn.x, btn.y, &x1, &y1, &w, &h);
-  tft.setCursor(btn.x + (btn.w - w)/2, btn.y + (btn.h - h)/2 + 4);
+  tft.setCursor(btn.x + (btn.w - w) / 2, btn.y + (btn.h - h) / 2 + 4);
   tft.print(btn.label);
 }
 
 void handleLiveTimeAndProgressBar() {
+  if (currentUIState != STATE_PLAYER) return;  // Intercept progress rendering if looking at browser
+
   uint32_t currentMs = activeEngineIsA ? playWav1.positionMillis() : playWav2.positionMillis();
   uint32_t totalMs = activeEngineIsA ? playWav1.lengthMillis() : playWav2.lengthMillis();
-  
   if (totalMs == 0) return;
+
   uint32_t totalSeconds = currentMs / 1000;
-  
   if (totalSeconds != lastUpdatedSecond) {
     lastUpdatedSecond = totalSeconds;
     uint32_t currentMins = totalSeconds / 60;
     uint32_t currentSecs = totalSeconds % 60;
+
     uint32_t totalTrackSeconds = totalMs / 1000;
     uint32_t totalTrackMins = totalTrackSeconds / 60;
     uint32_t totalTrackSecs = totalTrackSeconds % 60;
-    
+
     tft.setTextColor(ST7735_CYAN, 0x10A2);
     tft.setTextSize(1);
-    tft.setCursor(198, 155); 
+    tft.setCursor(198, 155);
     tft.printf("%02lu:%02lu / %02lu:%02lu", currentMins, currentSecs, totalTrackMins, totalTrackSecs);
   }
-  
+
   uint16_t newPixelWidth = ((float)currentMs / (float)totalMs) * pBarMaxWidth;
   if (newPixelWidth != lastProgressPixelWidth) {
     if (newPixelWidth > lastProgressPixelWidth) {
@@ -175,85 +192,104 @@ void handleLiveTimeAndProgressBar() {
   }
 }
 
-bool readTouchPanel(uint16_t &x, uint16_t &y) {
+bool readTouchPanel(uint16_t& x, uint16_t& y) {
   Wire.beginTransmission(FT6336U_ADDR);
-  Wire.write(0x02); 
+  Wire.write(0x02);
   if (Wire.endTransmission(true) != 0) return false;
+
   int bytesReceived = Wire.requestFrom(FT6336U_ADDR, 5);
   if (bytesReceived != 5) return false;
+
   uint8_t td_status = Wire.read();
-  uint8_t p1_xh     = Wire.read(); uint8_t p1_xl     = Wire.read();
-  uint8_t p1_yh     = Wire.read(); uint8_t p1_yl     = Wire.read();
+  uint8_t p1_xh = Wire.read();
+  uint8_t p1_xl = Wire.read();
+  uint8_t p1_yh = Wire.read();
+  uint8_t p1_yl = Wire.read();
+
   if ((td_status & 0x0F) == 0) return false;
+
   uint16_t rawX = ((uint16_t)(p1_xh & 0x0F) << 8) | p1_xl;
   uint16_t rawY = ((uint16_t)(p1_yh & 0x0F) << 8) | p1_yl;
-  x = rawY; y = 320 - rawX;        
+
+  x = rawY;
+  y = 320 - rawX;
   return true;
 }
 
 void processTouchControls() {
+  // If look state is directed to menu, dump touch flow entirely to the decoupled module
+  if (currentUIState == STATE_MENU) {
+    processMenuTouch();
+    return;
+  }
+
   static bool lastTouchState = false;
-  
-  // FIX: Stripped local redeclaration to force updates onto shared variables globally!
   bool currentTouch = readTouchPanel(touchX, touchY);
-  
+
   if (currentTouch && !lastTouchState) {
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
       if (touchX >= transport[i].x && touchX <= (transport[i].x + transport[i].w) &&
           touchY >= transport[i].y && touchY <= (transport[i].y + transport[i].h)) {
         
         transport[i].isPressed = true;
-        drawTransportButton(transport[i]); 
-        
+        drawTransportButton(transport[i]);
+
         if (i == 0) { // PREV
           if (currentTrackIndex > 0) {
-            playWav1.stop(); playWav2.stop();
+            playWav1.stop();
+            playWav2.stop();
             currentTrackIndex--;
             if (isMediaPlaying || isMediaPaused) playFreshAlbumStart();
             else updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
           }
-        }
-        else if (i == 1) { // PLAY / PAUSE
+        } else if (i == 1) { // PLAY / PAUSE
           if (!isMediaPlaying && !isMediaPaused) {
             playFreshAlbumStart();
           } else {
             if (activeEngineIsA) playWav1.togglePlayPause();
             else playWav2.togglePlayPause();
-            
+
             if (isMediaPlaying) {
-              isMediaPlaying = false; isMediaPaused = true;
+              isMediaPlaying = false;
+              isMediaPaused = true;
               updatePlayPauseButtonLabel("PLAY", 0x03E0);
             } else {
-              isMediaPlaying = true; isMediaPaused = false;
+              isMediaPlaying = true;
+              isMediaPaused = false;
               updatePlayPauseButtonLabel("PAUSE", 0xD4A0);
             }
           }
-        } 
-        else if (i == 2) { // STOP
+        } else if (i == 2) { // STOP
           if (isMediaPlaying || isMediaPaused) {
-            playWav1.stop(); playWav2.stop();
-            isMediaPlaying = false; isMediaPaused = false;
+            playWav1.stop();
+            playWav2.stop();
+            isMediaPlaying = false;
+            isMediaPaused = false;
             updatePlayPauseButtonLabel("PLAY", 0x03E0);
             updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
           }
-        }
-        else if (i == 3) { // NEXT
+        } else if (i == 3) { // NEXT
           if (currentTrackIndex < (totalTracks - 1)) {
-            playWav1.stop(); playWav2.stop();
+            playWav1.stop();
+            playWav2.stop();
             currentTrackIndex++;
             if (isMediaPlaying || isMediaPaused) playFreshAlbumStart();
             else updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
           }
+        } else if (i == 4) { // BROWSE (Transitions canvas state out of player dashboard)
+          currentUIState = STATE_MENU;
+          currentMenuLevel = LEVEL_ARTISTS; // Reset the browser back to screen 1 (Artists)
+          drawMenuScreen();     // Fires modular list interface painter
         }
       }
     }
   }
-  
+
   if (!currentTouch && lastTouchState) {
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
       if (transport[i].isPressed) {
         transport[i].isPressed = false;
-        drawTransportButton(transport[i]); 
+        drawTransportButton(transport[i]);
       }
     }
   }
