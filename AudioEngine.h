@@ -4,11 +4,11 @@
 #include <Arduino.h>
 #include <Audio.h>
 
-// Expose active nested directory path targets (Restored to working pointer signatures)
+// Expose active nested directory path targets
 extern const char* currentArtistFolder;
 extern const char* currentAlbumFolder;
 
-// Expose dynamic track structures 
+// Expose dynamic track structures
 extern char trackQueue[30][64];
 extern int totalTracks;
 extern int currentTrackIndex;

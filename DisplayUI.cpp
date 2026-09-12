@@ -1,6 +1,6 @@
 #include "DisplayUI.h"
-#include "LibraryMenu.h"
 #include "AudioEngine.h"
+#include "LibraryMenu.h"
 #include <Wire.h>
 #include <SD.h>
 
@@ -10,13 +10,6 @@
 #define FT6336U_ADDR 0x38
 
 ST7796_t3 tft = ST7796_t3(TFT_CS, TFT_DC, TFT_RST);
-
-// Dynamic State Allocation State Tracker
-UIState currentUIState = STATE_PLAYER;
-
-// Global Memory Cache for Root Directory Scanning
-char artistList[LEVEL_ARTISTS][64];
-int totalArtists = 0;
 
 uint32_t lastUpdatedSecond = 999999;
 uint16_t lastProgressPixelWidth = 0;
@@ -29,13 +22,12 @@ const int pBarY = 175;
 const int pBarMaxWidth = 254;
 const int pBarHeight = 8;
 
-// Expanded to 5 items to cleanly encompass the new BROWSE trigger
 UI_Button transport[] = {
-  { 10, 245, 85, 55, "PREV", 0x3186, false },
-  { 105, 245, 85, 55, "PLAY", 0x03E0, false },
-  { 200, 245, 85, 55, "STOP", ST7735_RED, false },
-  { 295, 245, 85, 55, "NEXT", 0x3186, false },
-  { 390, 245, 80, 55, "BROWSE", 0x5AAA, false }  // Indigo Blue UI Accent Button
+  {10,  245, 85, 55, "PREV",   0x3186, false},
+  {105, 245, 85, 55, "PLAY",   0x03E0, false},
+  {200, 245, 85, 55, "STOP",   ST7735_RED, false},
+  {295, 245, 85, 55, "NEXT",   0x3186, false},
+  {390, 245, 80, 55, "BROWSE", 0x5AAA, false}
 };
 
 void initDisplaySystem() {
@@ -64,44 +56,28 @@ void updatePlayPauseButtonLabel(const char* newLabel, uint16_t newColor) {
 
 void drawAudioDashboard() {
   tft.fillScreen(0x10A2);
-  tft.drawRoundRect(15, 15, 450, 200, 8, ST7735_WHITE);
+  tft.drawRoundRect(15, 15, 450, 200, 8, ST7735_WHITE); 
   tft.drawRect(22, 25, 160, 160, 0x52AA);
   tft.fillRect(pBarX, pBarY, pBarMaxWidth, pBarHeight, 0x2104);
-
+  
   for (int i = 0; i < 5; i++) drawTransportButton(transport[i]);
   drawAlbumArtwork();
 }
 
 void drawAlbumArtwork() {
-  String artPath = String(currentArtistFolder) + String(currentAlbumFolder) + "SSTP.bmp";
-  File bmpFile = SD.open(artPath.c_str(), FILE_READ);
-  if (!bmpFile) {
+  // Read purely from our isolated 51KB dynamic RAM frame cache
+  if (activeArtworkLoaded) {
+    tft.writeRect(22, 25, 160, 160, activeArtworkCache);
+  } else {
+    // Elegant fallback placeholder box if no image was cached yet
     tft.fillRect(22, 25, 160, 160, 0x2104);
-    tft.setTextColor(0x7BEF);
-    tft.setTextSize(1);
-    tft.setCursor(72, 105);
-    tft.print("NO ARTWORK");
-    return;
+    tft.drawRect(22, 25, 160, 160, 0x52AA);
   }
-
-  uint32_t pixelDataOffset = 54;
-  bmpFile.seek(10);
-  bmpFile.read((uint8_t*)&pixelDataOffset, 4);
-
-  uint16_t rowBuffer[160];
-
-  for (int y = 159; y >= 0; y--) {
-    bmpFile.seek(pixelDataOffset + (y * 320));
-    int bytesRead = bmpFile.read((uint8_t*)rowBuffer, 320);
-    if (bytesRead <= 0) break;
-    tft.writeRect(22, 25 + (159 - y), 160, 1, rowBuffer);
-  }
-  bmpFile.close();
 }
 
 void updateTrackWindow(int trackNum, const char* trackTitle) {
-  if (currentUIState != STATE_PLAYER) return;  // Maintain screen isolation
-
+  if (currentUIState != STATE_PLAYER) return; 
+  
   tft.fillRect(198, 25, 258, 140, 0x10A2);
   resetProgressTrackers();
 
@@ -147,20 +123,20 @@ void drawTransportButton(UI_Button btn) {
     tft.drawRoundRect(btn.x, btn.y, btn.w, btn.h, 10, ST7735_WHITE);
     tft.setTextColor(ST7735_WHITE);
   }
-  tft.setTextSize(1);  // Drop text sizes slightly down to fit tighter buttons
+  tft.setTextSize(1); 
   if (strcmp(btn.label, "BROWSE") == 0) tft.setTextSize(1);
   else tft.setTextSize(2);
-
+  
   int16_t x1, y1;
   uint16_t w, h;
   tft.getTextBounds(btn.label, btn.x, btn.y, &x1, &y1, &w, &h);
-  tft.setCursor(btn.x + (btn.w - w) / 2, btn.y + (btn.h - h) / 2 + 4);
+  tft.setCursor(btn.x + (btn.w - w)/2, btn.y + (btn.h - h)/2 + 4);
   tft.print(btn.label);
 }
 
 void handleLiveTimeAndProgressBar() {
-  if (currentUIState != STATE_PLAYER) return;  // Intercept progress rendering if looking at browser
-
+  if (currentUIState != STATE_PLAYER) return; 
+  
   uint32_t currentMs = activeEngineIsA ? playWav1.positionMillis() : playWav2.positionMillis();
   uint32_t totalMs = activeEngineIsA ? playWav1.lengthMillis() : playWav2.lengthMillis();
   if (totalMs == 0) return;
@@ -192,7 +168,7 @@ void handleLiveTimeAndProgressBar() {
   }
 }
 
-bool readTouchPanel(uint16_t& x, uint16_t& y) {
+bool readTouchPanel(uint16_t &x, uint16_t &y) {
   Wire.beginTransmission(FT6336U_ADDR);
   Wire.write(0x02);
   if (Wire.endTransmission(true) != 0) return false;
@@ -217,7 +193,6 @@ bool readTouchPanel(uint16_t& x, uint16_t& y) {
 }
 
 void processTouchControls() {
-  // If look state is directed to menu, dump touch flow entirely to the decoupled module
   if (currentUIState == STATE_MENU) {
     processMenuTouch();
     return;
@@ -276,10 +251,10 @@ void processTouchControls() {
             if (isMediaPlaying || isMediaPaused) playFreshAlbumStart();
             else updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
           }
-        } else if (i == 4) { // BROWSE (Transitions canvas state out of player dashboard)
+        } else if (i == 4) { // BROWSE
           currentUIState = STATE_MENU;
-          currentMenuLevel = LEVEL_ARTISTS; // Reset the browser back to screen 1 (Artists)
-          drawMenuScreen();     // Fires modular list interface painter
+          currentMenuLevel = LEVEL_ARTISTS;
+          drawMenuScreen();
         }
       }
     }

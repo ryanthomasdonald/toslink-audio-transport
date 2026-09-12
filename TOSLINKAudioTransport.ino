@@ -8,6 +8,7 @@ void setup() {
   delay(1500);
   Serial.begin(115200);
 
+  // Initialize modular systems
   initAudioSystem();
   initDisplaySystem();
 
@@ -15,19 +16,29 @@ void setup() {
     Serial.println("SD Card initialization failed!");
   }
 
-  // --- THE NEW MAGIC LINE ---
-  buildLibraryIndex(); // Scans everything once into RAM
-  
-  // Default load (optional, or you can start with empty queue)
-  scanCurrentAlbumFolder(); 
-  drawAudioDashboard();
+  // 1. --- NEW: FORCE OS TO INITIALIZE INTO BROWSER STATE ---
+  currentUIState = STATE_MENU;
+  currentMenuLevel = LEVEL_ARTISTS;
+  menuScrollOffset = 0;
+
+  // 2. --- NEW: RUN THE LAZY-LOAD SCAN FOR ROOT FOLDERS IMMEDIATELY ---
+  scanRootForArtists();
+
+  // 3. --- NEW: INITIAL UI RENDER PASS (Paints the Artist list right at boot) ---
+  drawMenuScreen();
 }
 
 void loop() {
+  // Check touch coordinates and update tracking state flags
   processTouchControls();
+
+  // Handle background gapless data pre-loading and crossovers
   updateAudioEngine();
+
+  // Update visual progress indicators if active stream is playing
   if (isMediaPlaying) {
     handleLiveTimeAndProgressBar();
   }
-  delay(2);
+
+  delay(2); // 2ms optimal polling cadence resolution
 }
