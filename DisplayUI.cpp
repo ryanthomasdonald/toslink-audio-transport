@@ -1,6 +1,6 @@
 #include "DisplayUI.h"
 #include "AudioEngine.h"
-#include "LibraryMenu.h"
+#include "LibraryCommon.h" // 🚀 FIXED: Links back to master architecture states
 #include <Wire.h>
 #include <SD.h>
 

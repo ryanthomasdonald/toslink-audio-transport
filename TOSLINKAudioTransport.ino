@@ -2,7 +2,7 @@
 #include <SD.h>
 #include "AudioEngine.h"
 #include "DisplayUI.h"
-#include "LibraryMenu.h"
+#include "LibraryCommon.h"
 
 void setup() {
   delay(1500);
@@ -16,29 +16,26 @@ void setup() {
     Serial.println("SD Card initialization failed!");
   }
 
-  // 1. --- NEW: FORCE OS TO INITIALIZE INTO BROWSER STATE ---
+  // --- THE FIXED MAGIC COMBINATION PASS ---
+  // Recursively indexes all artists, albums, and tracks into RAM at power-up
+  buildLibraryIndex();
+
+  // Force OS parameters directly into menu browser mode on page 1
   currentUIState = STATE_MENU;
   currentMenuLevel = LEVEL_ARTISTS;
   menuScrollOffset = 0;
 
-  // 2. --- NEW: RUN THE LAZY-LOAD SCAN FOR ROOT FOLDERS IMMEDIATELY ---
-  scanRootForArtists();
-
-  // 3. --- NEW: INITIAL UI RENDER PASS (Paints the Artist list right at boot) ---
+  // Render the initial Artist browser screen cleanly out of RAM
   drawMenuScreen();
 }
 
 void loop() {
-  // Check touch coordinates and update tracking state flags
   processTouchControls();
-
-  // Handle background gapless data pre-loading and crossovers
   updateAudioEngine();
-
-  // Update visual progress indicators if active stream is playing
-  if (isMediaPlaying) {
+  
+  if (isMediaPlaying && currentUIState == STATE_PLAYER) {
     handleLiveTimeAndProgressBar();
   }
-
-  delay(2); // 2ms optimal polling cadence resolution
+  
+  delay(2); 
 }
