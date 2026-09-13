@@ -1,14 +1,15 @@
 #ifndef AUDIO_ENGINE_H
 #define AUDIO_ENGINE_H
 
+#define PATH_BUFFER_SIZE 128
+
 #include <Arduino.h>
 #include <Audio.h>
 
-// Expose active nested directory path targets
-extern const char* currentArtistFolder;
-extern const char* currentAlbumFolder;
+// 🛠️ FIX: Allocate true static array memory space rather than constant literal pointers
+extern char currentArtistFolder[PATH_BUFFER_SIZE];
+extern char currentAlbumFolder[PATH_BUFFER_SIZE];
 
-// Expose dynamic track structures
 extern char trackQueue[30][64];
 extern int totalTracks;
 extern int currentTrackIndex;
@@ -17,11 +18,9 @@ extern bool isMediaPaused;
 extern bool activeEngineIsA;
 extern bool nextTrackPreLaunched;
 
-// Expose core audio framework objects
 extern AudioPlaySdWav playWav1;
 extern AudioPlaySdWav playWav2;
 
-// Functional audio engine commands
 void initAudioSystem();
 void scanCurrentAlbumFolder();
 void updateAudioEngine();

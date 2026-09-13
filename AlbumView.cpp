@@ -3,9 +3,13 @@
 #include "AudioEngine.h"
 
 void drawAlbumView() {
-  tft.fillScreen(0x0010); 
-  tft.fillRect(0, 0, 480, 45, 0x2104); tft.drawFastHLine(0, 45, 480, ST7735_WHITE);
-  tft.setTextColor(ST7735_CYAN); tft.setTextSize(2); tft.setCursor(15, 13); tft.print(library[selectedArtistIndex].name);
+  tft.fillScreen(0x0010);
+  tft.fillRect(0, 0, 480, 45, 0x2104);
+  tft.drawFastHLine(0, 45, 480, ST7735_WHITE);
+  tft.setTextColor(ST7735_CYAN);
+  tft.setTextSize(2);
+  tft.setCursor(15, 13);
+  tft.print(library[selectedArtistIndex].name);
 
   drawMenuSideButton(370, 60, 95, 65, "BACK", ST7735_RED);
   drawMenuSideButton(370, 140, 95, 65, "PG UP", 0x3186);
@@ -13,35 +17,57 @@ void drawAlbumView() {
 
   int albumCount = library[selectedArtistIndex].albumCount;
   if (albumCount == 0) {
-    tft.setTextColor(0x7BEF); tft.setCursor(30, 100); tft.print("EMPTY");
+    tft.setTextColor(0x7BEF);
+    tft.setCursor(30, 100);
+    tft.print("EMPTY");
   } else {
     for (int i = 0; i < 5; i++) {
-      int itemIndex = menuScrollOffset + i; if (itemIndex >= albumCount) break; 
-      int itemBoxY = 60 + (i * 50); 
-      tft.fillRect(15, itemBoxY - 4, 340, 42, 0x10A2); tft.drawRoundRect(15, itemBoxY - 4, 340, 42, 4, 0x3186);
+      int itemIndex = menuScrollOffset + i;
+      if (itemIndex >= albumCount) break;
+      int itemBoxY = 60 + (i * 50);
+      tft.fillRect(15, itemBoxY - 4, 340, 42, 0x10A2);
+      tft.drawRoundRect(15, itemBoxY - 4, 340, 42, 4, 0x3186);
       tft.fillRect(25, itemBoxY + 13, 8, 8, 0x5AAA);
-      tft.setTextColor(ST7735_WHITE); tft.setCursor(45, itemBoxY + 9); tft.print(library[selectedArtistIndex].albums[itemIndex].name);
+      tft.setTextColor(ST7735_WHITE);
+      tft.setCursor(45, itemBoxY + 9);
+      tft.print(library[selectedArtistIndex].albums[itemIndex].name);
     }
   }
 }
 
 void processAlbumViewTouch() {
-  static bool lastTouchState = false; bool currentTouch = readTouchPanel(touchX, touchY);
+  static bool lastTouchState = false;
+  bool currentTouch = readTouchPanel(touchX, touchY);
   int albumCount = library[selectedArtistIndex].albumCount;
 
   if (currentTouch && !lastTouchState) {
     if (touchX >= 370 && touchX <= 465) {
-      if (touchY >= 60 && touchY <= 125) { menuScrollOffset = 0; currentMenuLevel = LEVEL_ARTISTS; drawArtistView(); }
-      else if (touchY >= 140 && touchY <= 205) { if (menuScrollOffset >= 5) { menuScrollOffset -= 5; drawAlbumView(); } }
-      else if (touchY >= 220 && touchY <= 285) { if (menuScrollOffset + 5 < albumCount) { menuScrollOffset += 5; drawAlbumView(); } }
+      if (touchY >= 60 && touchY <= 125) {
+        menuScrollOffset = 0;
+        currentMenuLevel = LEVEL_ARTISTS;
+        drawArtistView();
+      } else if (touchY >= 140 && touchY <= 205) {
+        if (menuScrollOffset >= 5) {
+          menuScrollOffset -= 5;
+          drawAlbumView();
+        }
+      } else if (touchY >= 220 && touchY <= 285) {
+        if (menuScrollOffset + 5 < albumCount) {
+          menuScrollOffset += 5;
+          drawAlbumView();
+        }
+      }
     }
     for (int i = 0; i < 5; i++) {
-      int itemIndex = menuScrollOffset + i; if (itemIndex >= albumCount) break;
+      int itemIndex = menuScrollOffset + i;
+      if (itemIndex >= albumCount) break;
       int itemBoxY = 60 + (i * 50);
       if (touchX >= 15 && touchX <= 355 && touchY >= (itemBoxY - 4) && touchY <= (itemBoxY + 38)) {
-        selectedAlbumIndex = itemIndex; menuScrollOffset = 0;
-        currentMenuLevel = LEVEL_TRACKS; // 🚀 INSTANT RAM REDIRECT - NO SD READ GLITCH!
-        drawTrackView(); break;
+        selectedAlbumIndex = itemIndex;
+        menuScrollOffset = 0;
+        currentMenuLevel = LEVEL_TRACKS;  // 🚀 INSTANT RAM REDIRECT - NO SD READ GLITCH!
+        drawTrackView();
+        break;
       }
     }
   }

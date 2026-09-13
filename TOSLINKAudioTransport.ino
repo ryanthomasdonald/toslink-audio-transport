@@ -5,37 +5,41 @@
 #include "LibraryCommon.h"
 
 void setup() {
-  delay(1500);
+  // 🛠️ HARDWARE TIME INTEGRITY BOOT BLOCK
+  // The Teensy 4.1 boots instantly, but external panel ICs need settling time to avoid white screens
+  delay(1000);
   Serial.begin(115200);
 
-  // Initialize modular systems
-  initAudioSystem();
-  initDisplaySystem();
+  // Initialize modular systems in isolated, structured succession
+  initDisplaySystem();  // Init panel hardware first
+  initAudioSystem();    // Instantiate digital out routing
 
+  // Explicit verification block for hardware storage interfaces
   if (!(SD.begin(BUILTIN_SDCARD))) {
-    Serial.println("SD Card initialization failed!");
+    Serial.println("CRITICAL: Built-in SD Card hardware initialization failed!");
+    while (1) {
+      // Safe lockup warning loop
+      delay(100);
+    }
   }
 
-  // --- THE FIXED MAGIC COMBINATION PASS ---
-  // Recursively indexes all artists, albums, and tracks into RAM at power-up
+  // Deep recursive indexing out of SD root into memory structures
   buildLibraryIndex();
 
-  // Force OS parameters directly into menu browser mode on page 1
+  // Force clean layout execution metrics cleanly out of RAM
   currentUIState = STATE_MENU;
   currentMenuLevel = LEVEL_ARTISTS;
   menuScrollOffset = 0;
 
-  // Render the initial Artist browser screen cleanly out of RAM
   drawMenuScreen();
 }
 
 void loop() {
   processTouchControls();
   updateAudioEngine();
-  
+
   if (isMediaPlaying && currentUIState == STATE_PLAYER) {
     handleLiveTimeAndProgressBar();
   }
-  
-  delay(2); 
+  delay(2);
 }

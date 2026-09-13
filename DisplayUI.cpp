@@ -1,6 +1,6 @@
 #include "DisplayUI.h"
 #include "AudioEngine.h"
-#include "LibraryCommon.h" // 🚀 FIXED: Links back to master architecture states
+#include "LibraryCommon.h"  // 🚀 FIXED: Links back to master architecture states
 #include <Wire.h>
 #include <SD.h>
 
@@ -23,11 +23,11 @@ const int pBarMaxWidth = 254;
 const int pBarHeight = 8;
 
 UI_Button transport[] = {
-  {10,  245, 85, 55, "PREV",   0x3186, false},
-  {105, 245, 85, 55, "PLAY",   0x03E0, false},
-  {200, 245, 85, 55, "STOP",   ST7735_RED, false},
-  {295, 245, 85, 55, "NEXT",   0x3186, false},
-  {390, 245, 80, 55, "BROWSE", 0x5AAA, false}
+  { 10, 245, 85, 55, "PREV", 0x3186, false },
+  { 105, 245, 85, 55, "PLAY", 0x03E0, false },
+  { 200, 245, 85, 55, "STOP", ST7735_RED, false },
+  { 295, 245, 85, 55, "NEXT", 0x3186, false },
+  { 390, 245, 80, 55, "BROWSE", 0x5AAA, false }
 };
 
 void initDisplaySystem() {
@@ -56,10 +56,10 @@ void updatePlayPauseButtonLabel(const char* newLabel, uint16_t newColor) {
 
 void drawAudioDashboard() {
   tft.fillScreen(0x10A2);
-  tft.drawRoundRect(15, 15, 450, 200, 8, ST7735_WHITE); 
+  tft.drawRoundRect(15, 15, 450, 200, 8, ST7735_WHITE);
   tft.drawRect(22, 25, 160, 160, 0x52AA);
   tft.fillRect(pBarX, pBarY, pBarMaxWidth, pBarHeight, 0x2104);
-  
+
   for (int i = 0; i < 5; i++) drawTransportButton(transport[i]);
   drawAlbumArtwork();
 }
@@ -76,8 +76,8 @@ void drawAlbumArtwork() {
 }
 
 void updateTrackWindow(int trackNum, const char* trackTitle) {
-  if (currentUIState != STATE_PLAYER) return; 
-  
+  if (currentUIState != STATE_PLAYER) return;
+
   tft.fillRect(198, 25, 258, 140, 0x10A2);
   resetProgressTrackers();
 
@@ -123,20 +123,20 @@ void drawTransportButton(UI_Button btn) {
     tft.drawRoundRect(btn.x, btn.y, btn.w, btn.h, 10, ST7735_WHITE);
     tft.setTextColor(ST7735_WHITE);
   }
-  tft.setTextSize(1); 
+  tft.setTextSize(1);
   if (strcmp(btn.label, "BROWSE") == 0) tft.setTextSize(1);
   else tft.setTextSize(2);
-  
+
   int16_t x1, y1;
   uint16_t w, h;
   tft.getTextBounds(btn.label, btn.x, btn.y, &x1, &y1, &w, &h);
-  tft.setCursor(btn.x + (btn.w - w)/2, btn.y + (btn.h - h)/2 + 4);
+  tft.setCursor(btn.x + (btn.w - w) / 2, btn.y + (btn.h - h) / 2 + 4);
   tft.print(btn.label);
 }
 
 void handleLiveTimeAndProgressBar() {
-  if (currentUIState != STATE_PLAYER) return; 
-  
+  if (currentUIState != STATE_PLAYER) return;
+
   uint32_t currentMs = activeEngineIsA ? playWav1.positionMillis() : playWav2.positionMillis();
   uint32_t totalMs = activeEngineIsA ? playWav1.lengthMillis() : playWav2.lengthMillis();
   if (totalMs == 0) return;
@@ -168,7 +168,7 @@ void handleLiveTimeAndProgressBar() {
   }
 }
 
-bool readTouchPanel(uint16_t &x, uint16_t &y) {
+bool readTouchPanel(uint16_t& x, uint16_t& y) {
   Wire.beginTransmission(FT6336U_ADDR);
   Wire.write(0x02);
   if (Wire.endTransmission(true) != 0) return false;
@@ -203,13 +203,12 @@ void processTouchControls() {
 
   if (currentTouch && !lastTouchState) {
     for (int i = 0; i < 5; i++) {
-      if (touchX >= transport[i].x && touchX <= (transport[i].x + transport[i].w) &&
-          touchY >= transport[i].y && touchY <= (transport[i].y + transport[i].h)) {
-        
+      if (touchX >= transport[i].x && touchX <= (transport[i].x + transport[i].w) && touchY >= transport[i].y && touchY <= (transport[i].y + transport[i].h)) {
+
         transport[i].isPressed = true;
         drawTransportButton(transport[i]);
 
-        if (i == 0) { // PREV
+        if (i == 0) {  // PREV
           if (currentTrackIndex > 0) {
             playWav1.stop();
             playWav2.stop();
@@ -217,7 +216,7 @@ void processTouchControls() {
             if (isMediaPlaying || isMediaPaused) playFreshAlbumStart();
             else updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
           }
-        } else if (i == 1) { // PLAY / PAUSE
+        } else if (i == 1) {  // PLAY / PAUSE
           if (!isMediaPlaying && !isMediaPaused) {
             playFreshAlbumStart();
           } else {
@@ -234,7 +233,7 @@ void processTouchControls() {
               updatePlayPauseButtonLabel("PAUSE", 0xD4A0);
             }
           }
-        } else if (i == 2) { // STOP
+        } else if (i == 2) {  // STOP
           if (isMediaPlaying || isMediaPaused) {
             playWav1.stop();
             playWav2.stop();
@@ -243,7 +242,7 @@ void processTouchControls() {
             updatePlayPauseButtonLabel("PLAY", 0x03E0);
             updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
           }
-        } else if (i == 3) { // NEXT
+        } else if (i == 3) {  // NEXT
           if (currentTrackIndex < (totalTracks - 1)) {
             playWav1.stop();
             playWav2.stop();
@@ -251,7 +250,8 @@ void processTouchControls() {
             if (isMediaPlaying || isMediaPaused) playFreshAlbumStart();
             else updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
           }
-        } else if (i == 4) { // BROWSE
+        } else if (i == 4) {  // BROWSE
+          menuScrollOffset = 0;
           currentUIState = STATE_MENU;
           currentMenuLevel = LEVEL_ARTISTS;
           drawMenuScreen();

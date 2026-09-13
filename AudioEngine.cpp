@@ -2,11 +2,10 @@
 #include "DisplayUI.h"
 #include <SD.h>
 
-// Hardcoded initial library target directory allocations
-const char* currentArtistFolder = "Kaddisfly/";
-const char* currentAlbumFolder = "Set Sail the Prarie/";
+// 🛠️ FIX: Standard mutable array instantiation matching our header fix
+char currentArtistFolder[PATH_BUFFER_SIZE] = "Kaddisfly/";
+char currentAlbumFolder[PATH_BUFFER_SIZE] = "Set Sail the Prarie/";
 
-// Instantiations matching our fixed header parameters
 char trackQueue[30][64];
 int totalTracks = 0;
 int currentTrackIndex = 0;
@@ -20,7 +19,6 @@ AudioPlaySdWav playWav2;
 AudioMixer4 audioMixerL;
 AudioMixer4 audioMixerR;
 AudioOutputSPDIF3 spdif1;
-
 AudioConnection patchCord1(playWav1, 0, audioMixerL, 0);
 AudioConnection patchCord2(playWav2, 0, audioMixerL, 1);
 AudioConnection patchCord3(audioMixerL, 0, spdif1, 0);
@@ -45,7 +43,6 @@ void scanCurrentAlbumFolder() {
     Serial.printf("Scanner Error: Cannot open folder directory: %s\n", fullPath.c_str());
     return;
   }
-
   while (true) {
     File entry = dir.openNextFile();
     if (!entry) break;
@@ -62,7 +59,6 @@ void scanCurrentAlbumFolder() {
   }
   dir.close();
 
-  // Alphabetical sort to keep your audio tracks strictly sequential (01, 02, 03...)
   for (int i = 0; i < totalTracks - 1; i++) {
     for (int j = i + 1; j < totalTracks; j++) {
       if (strcmp(trackQueue[i], trackQueue[j]) > 0) {
@@ -87,7 +83,6 @@ void playFreshAlbumStart() {
   audioMixerL.gain(1, 0.0);
   audioMixerR.gain(0, 1.0);
   audioMixerR.gain(1, 0.0);
-
   String fullPath = String(currentArtistFolder) + String(currentAlbumFolder) + trackQueue[currentTrackIndex];
   if (playWav1.play(fullPath.c_str())) {
     isMediaPlaying = true;
