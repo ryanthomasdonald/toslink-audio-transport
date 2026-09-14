@@ -33,6 +33,20 @@ UI_Button transport[] = {
 void initDisplaySystem() {
   Wire.begin();
   Wire.setClock(400000);
+
+// 🚀 THE DEFENSIVE BOOTESCAPE: Enforce a strict hardware bus timeout!
+// If the touch panel or communication wires experience an edge collision,
+// the I2C bus will timeout after 3000 microseconds instead of freezing the CPU forever.
+#if defined(ARDUINO_ARCH_MEGAAVR) || defined(TEENSYDUINO)
+  Wire.setTimeout(3000);
+#endif
+
+  // Flush any leftover startup state spikes on the lines safely
+  Wire.beginTransmission(FT6336U_ADDR);
+  Wire.write(0x00);
+  Wire.endTransmission(true);
+
+  // Initialize standard display controls
   tft.init(320, 480);
   tft.invertDisplay(true);
   tft.setRotation(1);

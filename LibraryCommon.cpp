@@ -12,7 +12,6 @@ int selectedArtistIndex = -1;
 int selectedAlbumIndex = -1;
 int menuScrollOffset = 0;
 
-// 🚀 MEMORY BLOCK RESIZED TO 78.12 KB FOR THE NEW 200x200 CANVAS SIZE
 DMAMEM uint16_t activeArtworkCache[200 * 200];
 bool activeArtworkLoaded = false;
 
@@ -21,13 +20,17 @@ static String persistAlbumPath = "";
 
 bool readTouchPanel(uint16_t& x, uint16_t& y);
 
+// -----------------------------------------------------------------------------
+// 🚀 DEEP DYNAMIC INDEXER (Safe Mode: Interrupts Enabled for SDIO)
+// -----------------------------------------------------------------------------
 void buildLibraryIndex() {
-  AudioNoInterrupts();
+  // 🛑 REMOVED: AudioNoInterrupts();
+  // We MUST keep interrupts enabled so the SDIO hardware can signal data availability.
+
   Serial.println("Deep Indexing SD card structure into RAM...");
   libraryArtistCount = 0;
   File root = SD.open("/");
   if (!root) {
-    AudioInterrupts();
     return;
   }
 
@@ -83,6 +86,7 @@ void buildLibraryIndex() {
                   tracksDir.close();
                 }
 
+                // Sort Tracks
                 for (int t1 = 0; t1 < album->trackCount - 1; t1++) {
                   for (int t2 = t1 + 1; t2 < album->trackCount; t2++) {
                     if (strcmp(album->tracks[t1].filename, album->tracks[t2].filename) > 0) {
@@ -100,6 +104,7 @@ void buildLibraryIndex() {
           albumsDir.close();
         }
 
+        // Sort Albums
         for (int a1 = 0; a1 < artist->albumCount - 1; a1++) {
           for (int a2 = a1 + 1; a2 < artist->albumCount; a2++) {
             if (strcmp(artist->albums[a1].name, artist->albums[a2].name) > 0) {
@@ -116,6 +121,7 @@ void buildLibraryIndex() {
   }
   root.close();
 
+  // Sort Artists
   for (int i = 0; i < libraryArtistCount - 1; i++) {
     for (int j = i + 1; j < libraryArtistCount; j++) {
       if (strcmp(library[i].name, library[j].name) > 0) {
@@ -132,33 +138,35 @@ void buildLibraryIndex() {
     }
   }
   Serial.printf("Deep Indexing Complete. Cached %d Artists in RAM.\n", libraryArtistCount);
-  AudioInterrupts();
+
+  // 🛑 REMOVED: AudioInterrupts();
 }
 
 void cacheActiveAlbumArtwork(String path) {
-  AudioNoInterrupts();
+  // 🛑 REMOVED: AudioNoInterrupts();
+  // Using interrupts is required for efficient SD reading
+
   activeArtworkLoaded = false;
   File bmpFile = SD.open(path.c_str(), FILE_READ);
   if (!bmpFile) {
-    AudioInterrupts();
     return;
   }
   uint32_t dataOffset = 54;
   bmpFile.seek(10);
   bmpFile.read((uint8_t*)&dataOffset, 4);
 
-  // 🚀 READ MATH EXTENDED TO CAPTURE THE EXPANDED 200x200 GRID DEPTH
   for (int y = 199; y >= 0; y--) {
-    bmpFile.seek(dataOffset + (y * 400));  // 200 pixels * 2 bytes per RGB565 pixel = 400 bytes wide stride
+    bmpFile.seek(dataOffset + (y * 400));
     bmpFile.read((uint8_t*)&activeArtworkCache[(199 - y) * 200], 400);
   }
   bmpFile.close();
   activeArtworkLoaded = true;
-  AudioInterrupts();
+
+  // 🛑 REMOVED: AudioInterrupts();
 }
 
 void drawMenuSideButton(int x, int y, int w, int h, const char* label, uint16_t color) {
-  // Legacy helper preserved purely to prevent linker faults elsewhere
+  // Helper function
 }
 
 void drawMenuScreen() {
