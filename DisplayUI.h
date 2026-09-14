@@ -2,8 +2,17 @@
 #define DISPLAY_UI_H
 
 #include <Arduino.h>
-// 🛠️ FIX: Stripped legacy non-optimized framework dependencies to avoid include collision hazards
 #include <ST7796_t3.h>
+
+// =============================================================================
+// 🚀 THE MASTER DIETER RAMS DARK MODE PALETTE DEFINITIONS
+// =============================================================================
+#define COLOR_RAMS_BG 0x0841         // Deep Charcoal Base
+#define COLOR_RAMS_CARD 0x10A2       // Mid-Charcoal Containers & Bottom Rail
+#define COLOR_RAMS_DIVIDER 0x2104    // Low-contrast Structural Separator Lines
+#define COLOR_RAMS_TEXT_MUTE 0x7BEF  // Muted grey for supporting metadata
+#define COLOR_RAMS_ORANGE 0xD4A0     // Active Signal Accents & Progress Bars
+#define COLOR_RAMS_WHITE 0xFFFF      // Stark White for high-priority elements
 
 struct UI_Button {
   int x, y, w, h;
@@ -17,6 +26,7 @@ extern UI_Button transport[];
 extern uint16_t touchX;
 extern uint16_t touchY;
 
+// Subsystem Control Functions
 void initDisplaySystem();
 void drawAudioDashboard();
 void updateTrackWindow(int trackNum, const char* trackTitle);

@@ -6,15 +6,14 @@
 
 UIState currentUIState = STATE_MENU;
 MenuLevel currentMenuLevel = LEVEL_ARTISTS;
-
 ArtistEntry library[MAX_ARTISTS_TOTAL];
 int libraryArtistCount = 0;
-
 int selectedArtistIndex = -1;
 int selectedAlbumIndex = -1;
 int menuScrollOffset = 0;
 
-DMAMEM uint16_t activeArtworkCache[160 * 160];
+// 🚀 MEMORY BLOCK RESIZED TO 78.12 KB FOR THE NEW 200x200 CANVAS SIZE
+DMAMEM uint16_t activeArtworkCache[200 * 200];
 bool activeArtworkLoaded = false;
 
 static String persistArtistPath = "";
@@ -22,13 +21,9 @@ static String persistAlbumPath = "";
 
 bool readTouchPanel(uint16_t& x, uint16_t& y);
 
-// -----------------------------------------------------------------------------
-// 🚀 DEEP DYNAMIC INDEXER (Run Once at Startup - 100% RAM Driven After Boot)
-// -----------------------------------------------------------------------------
 void buildLibraryIndex() {
-  AudioNoInterrupts();  // 🔒 LOCK BUS AT STARTUP
+  AudioNoInterrupts();
   Serial.println("Deep Indexing SD card structure into RAM...");
-
   libraryArtistCount = 0;
   File root = SD.open("/");
   if (!root) {
@@ -36,32 +31,26 @@ void buildLibraryIndex() {
     return;
   }
 
-  // 1. Scan Artists (Root Folders)
   while (true) {
     File artistDir = root.openNextFile();
     if (!artistDir) break;
-
     if (artistDir.isDirectory()) {
       String artistName = String(artistDir.name());
       if (!artistName.startsWith(".") && artistName != "System Volume Information" && libraryArtistCount < MAX_ARTISTS_TOTAL) {
-
         ArtistEntry* artist = &library[libraryArtistCount];
         artist->name = strdup(artistName.c_str());
         artist->albumCount = 0;
         artist->albums = NULL;
 
-        // 2. Scan Albums for this Artist
         String artistPath = "/" + artistName;
         File albumsDir = SD.open(artistPath.c_str());
         if (albumsDir) {
           while (true) {
             File albumDir = albumsDir.openNextFile();
             if (!albumDir) break;
-
             if (albumDir.isDirectory()) {
               String albumName = String(albumDir.name());
               if (!albumName.startsWith(".") && artist->albumCount < MAX_ALBUMS_PER_ARTIST) {
-
                 artist->albums = (AlbumEntry*)realloc(artist->albums, (artist->albumCount + 1) * sizeof(AlbumEntry));
                 AlbumEntry* album = &artist->albums[artist->albumCount];
                 album->name = strdup(albumName.c_str());
@@ -69,14 +58,12 @@ void buildLibraryIndex() {
                 album->tracks = NULL;
                 album->artworkFilename = NULL;
 
-                // 3. Scan Tracks & Artwork inside this Album
                 String fullAlbumPath = artistPath + "/" + albumName;
                 File tracksDir = SD.open(fullAlbumPath.c_str());
                 if (tracksDir) {
                   while (true) {
                     File trackFile = tracksDir.openNextFile();
                     if (!trackFile) break;
-
                     String name = String(trackFile.name());
                     if (!name.startsWith(".")) {
                       if (!trackFile.isDirectory() && (name.endsWith(".wav") || name.endsWith(".WAV"))) {
@@ -96,7 +83,6 @@ void buildLibraryIndex() {
                   tracksDir.close();
                 }
 
-                // Sort Tracks Alphabetically
                 for (int t1 = 0; t1 < album->trackCount - 1; t1++) {
                   for (int t2 = t1 + 1; t2 < album->trackCount; t2++) {
                     if (strcmp(album->tracks[t1].filename, album->tracks[t2].filename) > 0) {
@@ -114,7 +100,6 @@ void buildLibraryIndex() {
           albumsDir.close();
         }
 
-        // Sort Albums Alphabetically
         for (int a1 = 0; a1 < artist->albumCount - 1; a1++) {
           for (int a2 = a1 + 1; a2 < artist->albumCount; a2++) {
             if (strcmp(artist->albums[a1].name, artist->albums[a2].name) > 0) {
@@ -131,7 +116,6 @@ void buildLibraryIndex() {
   }
   root.close();
 
-  // Sort Artists Alphabetically
   for (int i = 0; i < libraryArtistCount - 1; i++) {
     for (int j = i + 1; j < libraryArtistCount; j++) {
       if (strcmp(library[i].name, library[j].name) > 0) {
@@ -147,9 +131,8 @@ void buildLibraryIndex() {
       }
     }
   }
-
   Serial.printf("Deep Indexing Complete. Cached %d Artists in RAM.\n", libraryArtistCount);
-  AudioInterrupts();  // 🔓 UNLOCK BUS
+  AudioInterrupts();
 }
 
 void cacheActiveAlbumArtwork(String path) {
@@ -160,13 +143,14 @@ void cacheActiveAlbumArtwork(String path) {
     AudioInterrupts();
     return;
   }
-
   uint32_t dataOffset = 54;
   bmpFile.seek(10);
   bmpFile.read((uint8_t*)&dataOffset, 4);
-  for (int y = 159; y >= 0; y--) {
-    bmpFile.seek(dataOffset + (y * 320));
-    bmpFile.read((uint8_t*)&activeArtworkCache[(159 - y) * 160], 320);
+
+  // 🚀 READ MATH EXTENDED TO CAPTURE THE EXPANDED 200x200 GRID DEPTH
+  for (int y = 199; y >= 0; y--) {
+    bmpFile.seek(dataOffset + (y * 400));  // 200 pixels * 2 bytes per RGB565 pixel = 400 bytes wide stride
+    bmpFile.read((uint8_t*)&activeArtworkCache[(199 - y) * 200], 400);
   }
   bmpFile.close();
   activeArtworkLoaded = true;
@@ -174,15 +158,7 @@ void cacheActiveAlbumArtwork(String path) {
 }
 
 void drawMenuSideButton(int x, int y, int w, int h, const char* label, uint16_t color) {
-  tft.fillRoundRect(x, y, w, h, 10, color);
-  tft.drawRoundRect(x, y, w, h, 10, ST7735_WHITE);
-  tft.setTextColor(ST7735_WHITE);
-  tft.setTextSize(2);
-  int16_t x1, y1;
-  uint16_t tw, th;
-  tft.getTextBounds(label, x, y, &x1, &y1, &tw, &th);
-  tft.setCursor(x + (w - tw) / 2, y + (h - th) / 2 + 4);
-  tft.print(label);
+  // Legacy helper preserved purely to prevent linker faults elsewhere
 }
 
 void drawMenuScreen() {

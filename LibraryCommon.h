@@ -43,15 +43,16 @@ extern int libraryArtistCount;
 extern int selectedArtistIndex;
 extern int selectedAlbumIndex;
 extern int menuScrollOffset;
-extern uint16_t activeArtworkCache[160 * 160];
+
+// 🚀 SCALED TO 200x200 FOR THE GREATER SCREEN FOOTPRINT
+extern uint16_t activeArtworkCache[200 * 200];
 extern bool activeArtworkLoaded;
 
-void buildLibraryIndex();  // 🚀 Global single-scan initializer
+void buildLibraryIndex();
 void cacheActiveAlbumArtwork(String path);
 void drawMenuSideButton(int x, int y, int w, int h, const char* label, uint16_t color);
 void drawMenuScreen();
 void processMenuTouch();
-
 void drawArtistView();
 void processArtistViewTouch();
 void drawAlbumView();

@@ -2,10 +2,11 @@
 #include "DisplayUI.h"
 #include <SD.h>
 
-// 🛠️ FIX: Standard mutable array instantiation matching our header fix
+// Standard mutable array instantiation matching our header specifications
 char currentArtistFolder[PATH_BUFFER_SIZE] = "Kaddisfly/";
 char currentAlbumFolder[PATH_BUFFER_SIZE] = "Set Sail the Prarie/";
 
+// Instantiations matching our master header parameters
 char trackQueue[30][64];
 int totalTracks = 0;
 int currentTrackIndex = 0;
@@ -19,6 +20,7 @@ AudioPlaySdWav playWav2;
 AudioMixer4 audioMixerL;
 AudioMixer4 audioMixerR;
 AudioOutputSPDIF3 spdif1;
+
 AudioConnection patchCord1(playWav1, 0, audioMixerL, 0);
 AudioConnection patchCord2(playWav2, 0, audioMixerL, 1);
 AudioConnection patchCord3(audioMixerL, 0, spdif1, 0);
@@ -59,6 +61,7 @@ void scanCurrentAlbumFolder() {
   }
   dir.close();
 
+  // Alphabetical sort to keep your audio tracks strictly sequential (01, 02, 03...)
   for (int i = 0; i < totalTracks - 1; i++) {
     for (int j = i + 1; j < totalTracks; j++) {
       if (strcmp(trackQueue[i], trackQueue[j]) > 0) {
@@ -87,7 +90,9 @@ void playFreshAlbumStart() {
   if (playWav1.play(fullPath.c_str())) {
     isMediaPlaying = true;
     isMediaPaused = false;
-    updatePlayPauseButtonLabel("PAUSE", 0xD4A0);
+
+    // 🚀 FIX CONFIRMED: Forces vector twin-bars icon onto the deck on fresh boot/select
+    updatePlayPauseButtonLabel("||", COLOR_RAMS_CARD);
     updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
   } else {
     updateTrackWindow(currentTrackIndex + 1, "FILE NOT FOUND");
@@ -134,7 +139,8 @@ void updateAudioEngine() {
         updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
       } else {
         isMediaPlaying = false;
-        updatePlayPauseButtonLabel("PLAY", 0x03E0);
+        // 🚀 FIX CONFIRMED: Returns button deck cleanly to triangle vector icon
+        updatePlayPauseButtonLabel(">", COLOR_RAMS_CARD);
         updateTrackWindow(currentTrackIndex + 1, "ALBUM FINISHED");
       }
     }
@@ -158,7 +164,8 @@ void updateAudioEngine() {
         updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
       } else {
         isMediaPlaying = false;
-        updatePlayPauseButtonLabel("PLAY", 0x03E0);
+        // 🚀 FIX CONFIRMED: Returns button deck cleanly to triangle vector icon
+        updatePlayPauseButtonLabel(">", COLOR_RAMS_CARD);
         updateTrackWindow(currentTrackIndex + 1, "ALBUM FINISHED");
       }
     }
