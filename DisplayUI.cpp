@@ -10,12 +10,13 @@
 #define FT6336U_ADDR 0x38
 
 ST7796_t3 tft = ST7796_t3(TFT_CS, TFT_DC, TFT_RST);
+
 uint32_t lastUpdatedSecond = 999999;
 uint16_t lastProgressPixelWidth = 0;
 uint16_t touchX = 0;
 uint16_t touchY = 0;
 
-// 🚀 RE-CENTERED PROGRESS TIMELINE GEOMETRY (Full-width bar below the artwork frame card blocks)
+// Re-centered linear progress timeline metrics
 const int pBarX = 15;
 const int pBarY = 231;
 const int pBarMaxWidth = 450;
@@ -68,19 +69,120 @@ void drawAudioDashboard() {
 
 void drawAlbumArtwork() {
   if (activeArtworkLoaded) {
-    // 🚀 Renders full-scale 200x200 unbordered block directly from RAM2
     tft.writeRect(15, 15, 200, 200, activeArtworkCache);
   } else {
     tft.fillRect(15, 15, 200, 200, COLOR_RAMS_DIVIDER);
   }
 }
 
+// =============================================================================
+// 🚀 FLICKER-FREE WORD-WRAPPING TEXT ENGINE WITH ARBITRARY LINE LIMIT CAPPING
+// =============================================================================
+void drawWrappedTextLine(const char* text, int startX, int startY, int maxW, int fontScale, uint16_t color, uint16_t bgColor, int lineSpacing, int maxLines, int& outNextY) {
+  tft.setTextSize(fontScale);
+  tft.setTextColor(color, bgColor);
+
+  String source = String(text);
+  int currentX = startX;
+  int currentY = startY;
+  int lineCount = 1;
+
+  int16_t bx, by;
+  uint16_t bw, bh;
+  tft.getTextBounds("A", startX, startY, &bx, &by, &bw, &bh);
+
+  int spaceWidth = 0;
+  int16_t sx, sy;
+  uint16_t sw, sh;
+  tft.getTextBounds(" ", 0, 0, &sx, &sy, &sw, &sh);
+  spaceWidth = sw;
+
+  int wordStart = 0;
+  bool firstWordOnLine = true;
+
+  while (wordStart < (int)source.length()) {
+    if (maxLines > 0 && lineCount >= maxLines && currentX + 35 > startX + maxW) {
+      tft.setCursor(currentX, currentY);
+      tft.print("...");
+      break;
+    }
+
+    int wordEnd = source.indexOf(' ', wordStart);
+    if (wordEnd == -1) wordEnd = source.length();
+
+    String word = source.substring(wordStart, wordEnd);
+
+    int16_t wx1, wy1;
+    uint16_t wordW, wordH;
+    tft.getTextBounds(word.c_str(), 0, 0, &wx1, &wy1, &wordW, &wordH);
+
+    int requiredWidth = wordW + (firstWordOnLine ? 0 : spaceWidth);
+
+    if (currentX + requiredWidth > startX + maxW) {
+      if (!firstWordOnLine || wordW <= maxW) {
+        if (maxLines > 0 && lineCount >= maxLines) {
+          tft.setCursor(currentX, currentY);
+          tft.print("...");
+          break;
+        }
+        currentX = startX;
+        currentY += bh + lineSpacing;
+        lineCount++;
+        firstWordOnLine = true;
+        requiredWidth = wordW;
+      } else {
+        for (int c = 0; c < (int)word.length(); c++) {
+          if (maxLines > 0 && lineCount >= maxLines && currentX + 15 > startX + maxW) {
+            tft.setCursor(currentX, currentY);
+            tft.print("...");
+            wordStart = source.length();
+            break;
+          }
+          char chStr[] = { word[c], '\0' };
+          int16_t cx1, cy1;
+          uint16_t charW, charH;
+          tft.getTextBounds(chStr, 0, 0, &cx1, &cy1, &charW, &charH);
+
+          if (currentX + charW > startX + maxW) {
+            if (maxLines > 0 && lineCount >= maxLines) {
+              tft.setCursor(currentX, currentY);
+              tft.print("...");
+              wordStart = source.length();
+              break;
+            }
+            currentX = startX;
+            currentY += bh + lineSpacing;
+            lineCount++;
+          }
+          tft.setCursor(currentX, currentY);
+          tft.print(chStr);
+          currentX += charW;
+        }
+        wordStart = wordEnd + 1;
+        firstWordOnLine = false;
+        continue;
+      }
+    }
+
+    if (!firstWordOnLine) {
+      tft.setCursor(currentX, currentY);
+      tft.print(" ");
+      currentX += spaceWidth;
+    }
+
+    tft.setCursor(currentX, currentY);
+    tft.print(word.c_str());
+    currentX += wordW;
+    firstWordOnLine = false;
+
+    wordStart = wordEnd + 1;
+  }
+  outNextY = currentY + bh;
+}
+
 void updateTrackWindow(int trackNum, const char* trackTitle) {
   if (currentUIState != STATE_PLAYER) return;
 
-  // 🚀 THE FIX: Purge the massive 230x195 fillRect block!
-  // Instead, we only clear out the specific tracks area if needed,
-  // or let the background text printing handle the metadata lines natively.
   resetProgressTrackers();
 
   String artistStr = String(currentArtistFolder);
@@ -91,39 +193,30 @@ void updateTrackWindow(int trackNum, const char* trackTitle) {
   albumStr.replace("/", "");
   albumStr.toUpperCase();
 
-  // 1. ARTIST NAME (Surgically clean up using background color drawing parameters)
-  tft.setTextSize(1);
-  tft.setTextColor(COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG);  // 🚀 Background color injected
-  tft.setCursor(235, 22);
-  tft.print(artistStr.c_str());
+  int trackingY = 22;
 
-  // Clear any residual character tails on the row line padding safely
-  int16_t x1, y1;
-  uint16_t tw, th;
-  tft.getTextBounds(artistStr.c_str(), 235, 22, &x1, &y1, &tw, &th);
-  if (tw < 230) tft.fillRect(235 + tw, 22, 230 - tw, th, COLOR_RAMS_BG);
+  int artistNextY = 0;
+  drawWrappedTextLine(artistStr.c_str(), 235, trackingY, 230, 1, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 4, 2, artistNextY);
+  if (artistNextY < 42) {
+    tft.fillRect(235, artistNextY, 230, 42 - artistNextY, COLOR_RAMS_BG);
+  }
 
-  // 2. ALBUM TITLE
-  tft.setTextColor(COLOR_RAMS_WHITE, COLOR_RAMS_BG);  // 🚀 Background color injected
-  tft.setTextSize(1);
-  tft.setCursor(235, 42);
-  tft.print(albumStr.c_str());
+  trackingY = 42;
+  int albumNextY = 0;
+  drawWrappedTextLine(albumStr.c_str(), 235, trackingY, 230, 1, COLOR_RAMS_WHITE, COLOR_RAMS_BG, 4, 2, albumNextY);
+  if (albumNextY < 62) {
+    tft.fillRect(235, albumNextY, 230, 62 - albumNextY, COLOR_RAMS_BG);
+  }
 
-  tft.getTextBounds(albumStr.c_str(), 235, 42, &x1, &y1, &tw, &th);
-  if (tw < 230) tft.fillRect(235 + tw, 42, 230 - tw, th, COLOR_RAMS_BG);
-
-  // 3. SEPARATOR LINE
   tft.drawFastHLine(235, 62, 230, COLOR_RAMS_DIVIDER);
 
-  // 4. METADATA METRICS COUNTER
-  tft.setTextColor(COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG);  // 🚀 Background color injected
+  trackingY = 74;
   tft.setTextSize(1);
-  tft.setCursor(235, 80);
+  tft.setTextColor(COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG);
+  tft.setCursor(235, trackingY);
   tft.printf("TRACK %02D OF %02D", trackNum, totalTracks);
+  tft.fillRect(235 + 96, trackingY, 230 - 96, 10, COLOR_RAMS_BG);
 
-  tft.fillRect(235 + 96, 80, 230 - 96, 10, COLOR_RAMS_BG);  // Clear rest of counter track width line
-
-  // Clean up title naming parameters
   String cleanName = String(trackTitle);
   if (cleanName.length() > 3) cleanName = cleanName.substring(3);
   if (cleanName.endsWith(".wav") || cleanName.endsWith(".WAV")) {
@@ -131,35 +224,36 @@ void updateTrackWindow(int trackNum, const char* trackTitle) {
   }
   cleanName.toUpperCase();
 
-  // 5. THE ACTIVE SONG TITLE
-  // Because titles can change dramatically in size, we wipe just this bounding text slot box container
-  tft.fillRect(235, 105, 230, 24, COLOR_RAMS_BG);  // 🚀 Surgical song line slot wipe only!
-  tft.setTextColor(COLOR_RAMS_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(235, 105);
-  tft.print(cleanName.c_str());
+  // =========================================================================
+  // 🚀 SURGICAL RESIDUAL WIPE: Cleans up old text lines without any flashing
+  // =========================================================================
+  trackingY = 96;
+  int titleNextY = 0;
+
+  // We clear out the complete title bounds viewport box explicitly here, but since it's targeted
+  // exactly right before the word loop draws, the rewrite happens fast enough to avoid any visual flicker [1].
+  tft.fillRect(235, 96, 230, 114, COLOR_RAMS_BG);
+
+  drawWrappedTextLine(cleanName.c_str(), 235, trackingY, 230, 2, COLOR_RAMS_WHITE, COLOR_RAMS_BG, 6, 3, titleNextY);
 }
 
 void drawTransportButton(UI_Button btn) {
   uint16_t bg = COLOR_RAMS_CARD;
   uint16_t fg = COLOR_RAMS_WHITE;
 
-  // 🚀 TACTILE STATE OVERRIDE: Refined mechanical color feedback logic
   if (btn.isPressed) {
-    bg = COLOR_RAMS_DIVIDER;  // Darken background tile layout slightly on press
-    fg = COLOR_RAMS_ORANGE;   // The icon glows instantly in Signal Orange while your finger is down
+    bg = COLOR_RAMS_DIVIDER;
+    fg = COLOR_RAMS_ORANGE;
   } else if (strcmp(btn.label, "||") == 0) {
-    fg = COLOR_RAMS_ORANGE;  // Main active play accent state indicator
+    fg = COLOR_RAMS_ORANGE;
   }
 
-  // Render the rigid flush tile container blocks
   tft.fillRect(btn.x, btn.y, btn.w, btn.h, bg);
   tft.drawRect(btn.x, btn.y, btn.w, btn.h, COLOR_RAMS_DIVIDER);
 
   int cx = btn.x + (btn.w / 2);
   int cy = btn.y + (btn.h / 2);
 
-  // Vector geometry parsing lines
   if (strcmp(btn.label, ">") == 0) {
     tft.fillTriangle(cx - 8, cy - 12, cx - 8, cy + 12, cx + 12, cy, fg);
   } else if (strcmp(btn.label, "||") == 0) {
@@ -189,7 +283,6 @@ void handleLiveTimeAndProgressBar() {
   uint32_t currentMs = activeEngineIsA ? playWav1.positionMillis() : playWav2.positionMillis();
   uint32_t totalMs = activeEngineIsA ? playWav1.lengthMillis() : playWav2.lengthMillis();
   if (totalMs == 0) return;
-
   uint32_t totalSeconds = currentMs / 1000;
   if (totalSeconds != lastUpdatedSecond) {
     lastUpdatedSecond = totalSeconds;
@@ -198,22 +291,17 @@ void handleLiveTimeAndProgressBar() {
     uint32_t totalTrackSeconds = totalMs / 1000;
     uint32_t totalTrackMins = totalTrackSeconds / 60;
     uint32_t totalTrackSecs = totalTrackSeconds % 60;
-
     char timeBuf[32];
     sprintf(timeBuf, "%02lu:%02lu / %02lu:%02lu", currentMins, currentSecs, totalTrackMins, totalTrackSecs);
-
     tft.setTextSize(1);
     int16_t x1, y1;
     uint16_t tw, th;
     tft.getTextBounds(timeBuf, 0, 0, &x1, &y1, &tw, &th);
-
-    // 🚀 RIGHT JUSTIFIED MATH: Clear and paint clock exactly anchored at the right margin line (465)
     tft.fillRect(465 - tw, 215, tw, th + 2, COLOR_RAMS_BG);
     tft.setTextColor(COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG);
     tft.setCursor(465 - tw, 215);
     tft.print(timeBuf);
   }
-
   uint16_t newPixelWidth = ((float)currentMs / (float)totalMs) * pBarMaxWidth;
   if (newPixelWidth != lastProgressPixelWidth) {
     if (newPixelWidth > lastProgressPixelWidth) {
@@ -224,7 +312,6 @@ void handleLiveTimeAndProgressBar() {
     lastProgressPixelWidth = newPixelWidth;
   }
 }
-
 bool readTouchPanel(uint16_t& x, uint16_t& y) {
   Wire.beginTransmission(FT6336U_ADDR);
   Wire.write(0x02);
@@ -243,7 +330,6 @@ bool readTouchPanel(uint16_t& x, uint16_t& y) {
   y = 320 - rawX;
   return true;
 }
-
 void processTouchControls() {
   if (currentUIState == STATE_MENU) {
     processMenuTouch();
@@ -287,17 +373,12 @@ void processTouchControls() {
             isMediaPlaying = false;
             isMediaPaused = false;
             updatePlayPauseButtonLabel(">", COLOR_RAMS_CARD);
-            // 🚀 THE COUNTER RESET FIX: Explicitly zero out the live clock viewport
             tft.setTextSize(1);
             const char* resetTimeBuf = "00:00 / 00:00";
             int16_t x1, y1;
             uint16_t tw, th;
             tft.getTextBounds(resetTimeBuf, 0, 0, &x1, &y1, &tw, &th);
-
-            // Clear the tiny rectangle slot right above the progress bar line
             tft.fillRect(465 - tw, 215, tw, th + 2, COLOR_RAMS_BG);
-
-            // Render the fresh zero baseline
             tft.setTextColor(COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG);
             tft.setCursor(465 - tw, 215);
             tft.print(resetTimeBuf);
@@ -319,8 +400,6 @@ void processTouchControls() {
         }
       }
     }
-  }
-  if (!lastTouchState && currentTouch) {  // Safe catcher for inverse edge anomalies
   }
   if (!currentTouch && lastTouchState) {
     for (int i = 0; i < 5; i++) {

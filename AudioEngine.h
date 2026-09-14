@@ -10,7 +10,7 @@
 extern char currentArtistFolder[PATH_BUFFER_SIZE];
 extern char currentAlbumFolder[PATH_BUFFER_SIZE];
 
-extern char trackQueue[30][64];
+extern char trackQueue[30][96];
 extern int totalTracks;
 extern int currentTrackIndex;
 extern bool isMediaPlaying;

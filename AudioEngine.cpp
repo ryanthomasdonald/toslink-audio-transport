@@ -7,7 +7,7 @@ char currentArtistFolder[PATH_BUFFER_SIZE] = "Kaddisfly/";
 char currentAlbumFolder[PATH_BUFFER_SIZE] = "Set Sail the Prarie/";
 
 // Instantiations matching our master header parameters
-char trackQueue[30][64];
+char trackQueue[30][96];
 int totalTracks = 0;
 int currentTrackIndex = 0;
 bool isMediaPlaying = false;
@@ -52,7 +52,7 @@ void scanCurrentAlbumFolder() {
       String name = String(entry.name());
       if (name.endsWith(".wav") || name.endsWith(".WAV")) {
         if (totalTracks < 30) {
-          name.toCharArray(trackQueue[totalTracks], 64);
+          name.toCharArray(trackQueue[totalTracks], 96);  // 🚀 Expanded buffer ceiling from 64 to 96
           totalTracks++;
         }
       }
