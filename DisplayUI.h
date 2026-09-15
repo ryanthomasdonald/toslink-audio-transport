@@ -37,5 +37,6 @@ void handleLiveTimeAndProgressBar();
 void drawAlbumArtwork();
 bool readTouchPanel(uint16_t& x, uint16_t& y);
 void processTouchControls();
+void drawBootLoadingScreen();
 
 #endif
