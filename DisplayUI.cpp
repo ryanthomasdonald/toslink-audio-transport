@@ -1,23 +1,23 @@
 #include "DisplayUI.h"
 #include "AudioEngine.h"
 #include "LibraryCommon.h"
-#include "BespokeFont.h"  // 🚀 HOOK UP OUR CUSTOM ROW-MAJOR BITMAP DICTIONARY HERE
+#include "BespokeFont.h"
 #include <Wire.h>
 #include <SD.h>
 
+// 🚀 HARDWARE 3-PIN SCREEN CONTROL ASSIGNMENTS
 #define TFT_DC 8
 #define TFT_CS 10
 #define TFT_RST 9
 #define FT6336U_ADDR 0x38
 
 ST7796_t3 tft = ST7796_t3(TFT_CS, TFT_DC, TFT_RST);
-
 uint32_t lastUpdatedSecond = 999999;
 uint16_t lastProgressPixelWidth = 0;
 uint16_t touchX = 0;
 uint16_t touchY = 0;
 
-// Re-centered linear progress timeline metrics
+// Linear progress timeline metrics
 const int pBarX = 15;
 const int pBarY = 231;
 const int pBarMaxWidth = 450;
@@ -35,37 +35,42 @@ void initDisplaySystem() {
   Wire.begin();
   Wire.setClock(400000);
 
-// Enforce a strict hardware bus timeout to prevent long line freezes
 #if defined(TEENSYDUINO)
   Wire.setTimeout(3000);
 #endif
 
-  // Send a safe, native empty transmission to the touch chip to clear its buffer
+  // 🚀 THE STABILITY FIX: Pass the 30MHz speed override safely as the third argument!
+  // This scales down the raw SPI bus clock transfer rate from its blistering default
+  // down to a noise-resistant threshold that handles long jumper wires easily.
+  tft.init(320, 480, 30000000);
+
+  // Send a safe, native empty transmission to the touch chip
   Wire.beginTransmission(FT6336U_ADDR);
   Wire.write(0x00);
   Wire.endTransmission(true);
 
-  // Initialize standard display controls cleanly
-  tft.init(320, 480);
   tft.invertDisplay(true);
+  tft.setRotation(1);  // Force the initial orientation
+}
+
+// 🚀 NEW DEFENSIVE REFRESH: Call this at the start of drawMenuScreen()
+// and updateTrackWindow() to "re-lock" the orientation and clear noise.
+void refreshDisplayHardwareState() {
+  // Re-assert the rotation and inversion registers.
+  // If noise flipped the screen, this snaps it back instantly.
   tft.setRotation(1);
+  tft.invertDisplay(true);
 }
 
 void drawBootLoadingScreen() {
   tft.fillScreen(COLOR_RAMS_BG);  // 0x0841 Deep Charcoal Base
 
-  // Revert temporarily to system font for simple loading rendering
-  tft.setFont(NULL);
-  tft.setTextSize(2);
-  tft.setTextColor(COLOR_RAMS_WHITE);
+  int startX = 180;
+  int startY = 150;
+  int dummyNextY = 0;
 
-  const char* msg = "LOADING...";
-  int16_t x1, y1;
-  uint16_t tw, th;
-  tft.getTextBounds(msg, 0, 0, &x1, &y1, &tw, &th);
-
-  tft.setCursor((480 - tw) / 2, (320 - th) / 2);
-  tft.print(msg);
+  // Render "LOADING..." using our polished 10pt (Scale 2) bespoke font
+  drawWrappedTextLine("LOADING...", startX, startY, 200, 2, COLOR_RAMS_WHITE, COLOR_RAMS_BG, 0, 1, dummyNextY);
 }
 
 void resetProgressTrackers() {
@@ -105,28 +110,36 @@ void drawAlbumArtwork() {
   }
 }
 
-void drawBespokeChar(char c, int x, int y, int scale, uint16_t fgColor, uint16_t bgColor) {
-  // Convert lowercase inputs to uppercase on the fly for uniformity
+// =============================================================================
+// 🚀 NATIVE ROW-MAJOR ATOMIC 5X5 VARIABLE-WIDTH CHARACTER BLITTER
+// =============================================================================
+int getBespokeCharWidth(char c) {
+  if (c == ' ') return 3;
+  if (c == '.' || c == '!' || c == '\'' || c == ':' || c == ';') return 1;
+  if (c == '(' || c == ')') return 2;
+  if (c == '<' || c == '>') return 3;
+  return 5;
+}
+
+void drawBespokeChar(char c, int x, int y, int scale, uint16_t fgColor, uint16_t bgColor, int& outRenderedWidth) {
   if (c >= 'a' && c <= 'z') c -= 32;
 
-  // Safe boundary check: Out-of-bounds characters are rendered as a clean space block
+  int contentWidth = getBespokeCharWidth(c);
+  int totalWidthWithPad = (contentWidth + 1) * scale;
+
   if (c < 32 || c > 90) {
-    tft.fillRect(x, y, 6 * scale, 5 * scale, bgColor);
+    tft.fillRect(x, y, totalWidthWithPad, 5 * scale, bgColor);
+    outRenderedWidth = totalWidthWithPad;
     return;
   }
 
-  // 🚀 INVARIANT OFFSET MATH: Index calculations align with the continuous 32-90 array structure
   int charIndex = c - 32;
   int bitmapOffset = charIndex * 5;
 
-  // Sweep down the 5 rows
   for (int row = 0; row < 5; row++) {
-    // Read the packed row byte out of Flash memory via pgm_read_byte
     uint8_t rowBits = pgm_read_byte(&Bespoke5x5Bitmaps[bitmapOffset + row]);
 
-    // Sweep across the 5 columns
-    for (int col = 0; col < 5; col++) {
-      // Read bits from Left to Right (Bit 7 down to Bit 3)
+    for (int col = 0; col < contentWidth; col++) {
       bool bitIsActive = (rowBits & (0x80 >> col));
       uint16_t activePixelColor = bitIsActive ? fgColor : bgColor;
 
@@ -134,12 +147,12 @@ void drawBespokeChar(char c, int x, int y, int scale, uint16_t fgColor, uint16_t
     }
   }
 
-  // Render the 1-pixel wide tracking padding spacer trail
-  tft.fillRect(x + (5 * scale), y, scale, 5 * scale, bgColor);
+  tft.fillRect(x + (contentWidth * scale), y, scale, 5 * scale, bgColor);
+  outRenderedWidth = totalWidthWithPad;
 }
 
 // =============================================================================
-// 🚀 WORD-WRAPPING ENGINE RE-CONFIGURED FOR ROW-MAJOR ATOMIC TYPOGRAPHY
+// 🚀 WORD-WRAPPING ENGINE WITH VARIABLE-WIDTH TRACKING CORE
 // =============================================================================
 void drawWrappedTextLine(const char* text, int startX, int startY, int maxW, int fontScale, uint16_t color, uint16_t bgColor, int lineSpacing, int maxLines, int& outNextY) {
   String source = String(text);
@@ -147,20 +160,19 @@ void drawWrappedTextLine(const char* text, int startX, int startY, int maxW, int
   int currentY = startY;
   int lineCount = 1;
 
-  // Explicitly define dimensions: 5px glyph + 1px spacing multiplied by scale
-  int charW = 6 * fontScale;
   int charH = 5 * fontScale;
-  int spaceWidth = 4 * fontScale;
+  int spaceWidth = getBespokeCharWidth(' ') * fontScale;
+  int dotWidth = (getBespokeCharWidth('.') + 1) * fontScale;
 
   int wordStart = 0;
   bool firstWordOnLine = true;
 
   while (wordStart < (int)source.length()) {
-    // Line constraint ceiling checks
-    if (maxLines > 0 && lineCount >= maxLines && currentX + (spaceWidth * 3) > startX + maxW) {
+    if (maxLines > 0 && lineCount >= maxLines && currentX + (dotWidth * 3) > startX + maxW) {
       for (int e = 0; e < 3; e++) {
-        drawBespokeChar('.', currentX, currentY, fontScale, color, bgColor);
-        currentX += charW;
+        int pad = 0;
+        drawBespokeChar('.', currentX, currentY, fontScale, color, bgColor, pad);
+        currentX += pad;
       }
       break;
     }
@@ -169,15 +181,23 @@ void drawWrappedTextLine(const char* text, int startX, int startY, int maxW, int
     if (wordEnd == -1) wordEnd = source.length();
 
     String word = source.substring(wordStart, wordEnd);
-    int wordW = word.length() * charW;
-    if (word.length() > 0) wordW -= fontScale;  // Drop the final trailing spacer bit
 
-    int requiredWidth = wordW + (firstWordOnLine ? 0 : spaceWidth);
+    int wordW = 0;
+    for (int i = 0; i < (int)word.length(); i++) {
+      wordW += (getBespokeCharWidth(word[i]) + 1) * fontScale;
+    }
+    if (word.length() > 0) wordW -= fontScale;
+
+    int requiredWidth = wordW + (firstWordOnLine ? 0 : spaceWidth + fontScale);
 
     if (currentX + requiredWidth > startX + maxW) {
       if (!firstWordOnLine || wordW <= maxW) {
         if (maxLines > 0 && lineCount >= maxLines) {
-          drawBespokeChar('.', currentX, currentY, fontScale, color, bgColor);
+          for (int e = 0; e < 3; e++) {
+            int pad = 0;
+            drawBespokeChar('.', currentX, currentY, fontScale, color, bgColor, pad);
+            currentX += pad;
+          }
           break;
         }
         currentX = startX;
@@ -186,16 +206,18 @@ void drawWrappedTextLine(const char* text, int startX, int startY, int maxW, int
         firstWordOnLine = true;
         requiredWidth = wordW;
       } else {
-        // Character wrapping fallback block for extra long filenames
         for (int c = 0; c < (int)word.length(); c++) {
-          if (maxLines > 0 && lineCount >= maxLines && currentX + charW > startX + maxW) {
-            drawBespokeChar('.', currentX, currentY, fontScale, color, bgColor);
+          int charPadW = 0;
+          int nextCharW = (getBespokeCharWidth(word[c]) + 1) * fontScale;
+
+          if (maxLines > 0 && lineCount >= maxLines && currentX + nextCharW > startX + maxW) {
+            drawBespokeChar('.', currentX, currentY, fontScale, color, bgColor, charPadW);
             wordStart = source.length();
             break;
           }
-          if (currentX + charW > startX + maxW) {
+          if (currentX + nextCharW > startX + maxW) {
             if (maxLines > 0 && lineCount >= maxLines) {
-              drawBespokeChar('.', currentX, currentY, fontScale, color, bgColor);
+              drawBespokeChar('.', currentX, currentY, fontScale, color, bgColor, charPadW);
               wordStart = source.length();
               break;
             }
@@ -203,8 +225,8 @@ void drawWrappedTextLine(const char* text, int startX, int startY, int maxW, int
             currentY += charH + lineSpacing;
             lineCount++;
           }
-          drawBespokeChar(word[c], currentX, currentY, fontScale, color, bgColor);
-          currentX += charW;
+          drawBespokeChar(word[c], currentX, currentY, fontScale, color, bgColor, charPadW);
+          currentX += charPadW;
         }
         wordStart = wordEnd + 1;
         firstWordOnLine = false;
@@ -213,14 +235,15 @@ void drawWrappedTextLine(const char* text, int startX, int startY, int maxW, int
     }
 
     if (!firstWordOnLine) {
-      tft.fillRect(currentX, currentY, spaceWidth, charH, bgColor);
-      currentX += spaceWidth;
+      int spacePadW = 0;
+      drawBespokeChar(' ', currentX, currentY, fontScale, color, bgColor, spacePadW);
+      currentX += spacePadW;
     }
 
-    // Output word token array structures character-by-character
     for (int i = 0; i < (int)word.length(); i++) {
-      drawBespokeChar(word[i], currentX, currentY, fontScale, color, bgColor);
-      currentX += charW;
+      int charPadW = 0;
+      drawBespokeChar(word[i], currentX, currentY, fontScale, color, bgColor, charPadW);
+      currentX += charPadW;
     }
     firstWordOnLine = false;
     wordStart = wordEnd + 1;
@@ -231,17 +254,15 @@ void drawWrappedTextLine(const char* text, int startX, int startY, int maxW, int
 
 void testBespokeString(const char* text, int startX, int startY, int scale, uint16_t fg, uint16_t bg) {
   int currentX = startX;
-  int charStride = 6 * scale;
-
-  int len = strlen(text);
-  for (int i = 0; i < len; i++) {
-    drawBespokeChar(text[i], currentX, startY, scale, fg, bg);
-    currentX += charStride;
+  for (int i = 0; i < (int)strlen(text); i++) {
+    int charPadW = 0;
+    drawBespokeChar(text[i], currentX, startY, scale, fg, bg, charPadW);
+    currentX += charPadW;
   }
 }
 
 // =============================================================================
-// 🚀 METADATA TRACK WINDOW - RECONFIGURED FOR SCALE 3 HEADER & SCALE 1 METRICS
+// 🚀 HERO TRACK METADATA WINDOW MANAGER
 // =============================================================================
 void updateTrackWindow(int trackNum, const char* trackTitle) {
   if (currentUIState != STATE_PLAYER) return;
@@ -256,47 +277,66 @@ void updateTrackWindow(int trackNum, const char* trackTitle) {
   albumStr.replace("/", "");
   albumStr.toUpperCase();
 
-  // Clear out the master right column text viewport area
+  // Clear out the master right column text viewport area completely
   tft.fillRect(235, 15, 230, 195, COLOR_RAMS_BG);
 
   int trackingY = 18;
 
-  // 1. ARTIST NAME LINE (Scale 2 = Crisp 10px tall grid letters)
+  // 1. ARTIST NAME LINE (Scale 2 = 10px tall grid letters)
   int artistNextY = 0;
   drawWrappedTextLine(artistStr.c_str(), 235, trackingY, 230, 2, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 4, 2, artistNextY);
 
-  // 2. ALBUM TITLE LINE (Scale 2 = Crisp 10px tall grid letters)
+  // 2. ALBUM TITLE LINE (Scale 2 = 10px tall grid letters)
   trackingY = artistNextY + 8;
   int albumNextY = 0;
-  drawWrappedTextLine(albumStr.c_str(), 235, trackingY, 230, 2, COLOR_RAMS_WHITE, COLOR_RAMS_BG, 4, 2, albumNextY);
-
-  // 3. LOW-CONTRAST SEPARATOR HORIZONTAL GRID LINE
-  tft.drawFastHLine(235, 62, 230, COLOR_RAMS_DIVIDER);
-
-  // Process track filename tags cleanly
+  drawWrappedTextLine(albumStr.c_str(), 235, trackingY, 230, 2, COLOR_RAMS_WHITE, COLOR_RAMS_BG, 4, 2, albumNextY);  // 3. LOW-CONTRAST SEPARATOR HORIZONTAL GRID LINE
+  tft.drawFastHLine(235, 62, 230, COLOR_RAMS_DIVIDER);                                                               // Process track filename tags cleanly
   String cleanName = String(trackTitle);
   if (cleanName.length() > 3) cleanName = cleanName.substring(3);
-  if (cleanName.endsWith(".wav") || cleanName.endsWith(".WAV")) {
-    cleanName = cleanName.substring(0, cleanName.length() - 4);
-  }
-  cleanName.toUpperCase();
-
-  // 4. THE ACTIVE HEADLINE SONG TITLE (🚀 SHRUNK TO SCALE 3 = 15px tall typography)
-  trackingY = 76;  // Moves up beautifully now that the space is clear
-  int titleNextY = 0;
-
-  // Targeted clear of the specific title viewport slot envelope box
-  tft.fillRect(235, 76, 230, 60, COLOR_RAMS_BG);
-  drawWrappedTextLine(cleanName.c_str(), 235, trackingY, 230, 3, COLOR_RAMS_WHITE, COLOR_RAMS_BG, 6, 3, titleNextY);
-
-  // 5. 🚀 HARMONIZED TRACK COUNTER (Moved down to the time tracking metric axis line)
-  // Left-aligned at X = 235, drawn at Scale 1 (5pt)
+  if (cleanName.endsWith(".wav") || cleanName.endsWith(".WAV")) { cleanName = cleanName.substring(0, cleanName.length() - 4); }
+  cleanName.toUpperCase();  // 4. THE ACTIVE HEADLINE SONG TITLE (LOCKED BACK TO FIXED SCALE 3 = 15pt)
+  trackingY = 74;
+  int titleNextY = 0;                                                                                                 // Enforce a strict maxLines limit of 3 with auto ellipsis truncation.
+  drawWrappedTextLine(cleanName.c_str(), 235, trackingY, 230, 3, COLOR_RAMS_WHITE, COLOR_RAMS_BG, 6, 3, titleNextY);  // 5. HARMONIZED TRACK COUNTER (Left-aligned baseline axis line at Y=216)
   char countBuf[24];
   sprintf(countBuf, "TRACK %02d OF %02d", trackNum, totalTracks);
   int dummyCountY = 0;
   drawWrappedTextLine(countBuf, 235, 216, 120, 1, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 0, 1, dummyCountY);
+}  // =============================================================================// 🚀 TIMELINE METRICS CLOCK RE-RENDERER// =============================================================================
+void handleLiveTimeAndProgressBar() {
+  if (currentUIState != STATE_PLAYER) return;
+  uint32_t currentMs = activeEngineIsA ? playWav1.positionMillis() : playWav2.positionMillis();
+  uint32_t totalMs = activeEngineIsA ? playWav1.lengthMillis() : playWav2.lengthMillis();
+  if (totalMs == 0) return;
+  uint32_t totalSeconds = currentMs / 1000;
+  if (totalSeconds != lastUpdatedSecond) {
+    lastUpdatedSecond = totalSeconds;
+    uint32_t currentMins = totalSeconds / 60;
+    uint32_t currentSecs = totalSeconds % 60;
+    uint32_t totalTrackSeconds = totalMs / 1000;
+    uint32_t totalTrackMins = totalTrackSeconds / 60;
+    uint32_t totalTrackSecs = totalTrackSeconds % 60;
+    char timeBuf[32];
+    sprintf(timeBuf, "%02lu:%02lu / %02lu:%02lu", currentMins, currentSecs, totalTrackMins, totalTrackSecs);  // Calculate tracking width safely
+    int len = strlen(timeBuf);
+    int timeStringWidth = 0;
+    for (int i = 0; i < len; i++) { timeStringWidth += (getBespokeCharWidth(timeBuf[i]) + 1) * 1; }
+    timeStringWidth -= 1;
+    int timeX = 465 - timeStringWidth;
+    int dummyTimeY = 0;  // Wipes just the time text box slot selectively right before blitting
+    tft.fillRect(timeX - 2, 216, timeStringWidth + 4, 6, COLOR_RAMS_BG);
+    drawWrappedTextLine(timeBuf, timeX, 216, timeStringWidth + 2, 1, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 0, 1, dummyTimeY);
+  }
+  uint16_t newPixelWidth = ((float)currentMs / (float)totalMs) * pBarMaxWidth;
+  if (newPixelWidth != lastProgressPixelWidth) {
+    if (newPixelWidth > lastProgressPixelWidth) {
+      tft.fillRect(pBarX + lastProgressPixelWidth, pBarY, newPixelWidth - lastProgressPixelWidth, pBarHeight, COLOR_RAMS_ORANGE);
+    } else {
+      tft.fillRect(pBarX, pBarY, pBarMaxWidth, pBarHeight, COLOR_RAMS_DIVIDER);
+    }
+    lastProgressPixelWidth = newPixelWidth;
+  }
 }
-
 void drawTransportButton(UI_Button btn) {
   uint16_t bg = COLOR_RAMS_CARD;
   uint16_t fg = COLOR_RAMS_WHITE;
@@ -323,70 +363,15 @@ void drawTransportButton(UI_Button btn) {
   } else if (strcmp(btn.label, ">>") == 0) {
     tft.fillTriangle(cx, cy - 10, cx, cy + 10, cx + 10, cy, fg);
     tft.fillTriangle(cx - 10, cy - 10, cx - 10, cy + 10, cx, cy, fg);
-  } else {  // System fallback for string buttons like "MENU"
-            // =========================================================================
-    // 🚀 HARMONIZED STRING BUTTON DRAW (MENU BUTTON)
-    // Re-configured to route cleanly through our custom Scale 2 (10pt) 5x5 engine!
-    // =========================================================================
-
-    // 5px character + 1px trailing pad = 6px stride * 4 chars ("MENU") = 24px wide footprint
-    // Scale 2 multiplies this to exactly 48px wide total
+  } else {  // HARMONIZED STRING BUTTON DRAW (MENU BUTTON)
     int stringWidth = 48;
-    int stringHeight = 10;  // 5px * Scale 2
-
-    // Mathematically center the 48x10 text box inside the 96x70 button canvas bounds
+    int stringHeight = 10;
     int textX = btn.x + ((btn.w - stringWidth) / 2);
     int textY = btn.y + ((btn.h - stringHeight) / 2);
-
     int dummyNextY = 0;
-
-    // Draw the text using the exact button foreground (fg) and background (bg) states
     drawWrappedTextLine(btn.label, textX, textY, stringWidth + 2, 2, fg, bg, 0, 1, dummyNextY);
   }
 }
-
-void handleLiveTimeAndProgressBar() {
-  if (currentUIState != STATE_PLAYER) return;
-  uint32_t currentMs = activeEngineIsA ? playWav1.positionMillis() : playWav2.positionMillis();
-  uint32_t totalMs = activeEngineIsA ? playWav1.lengthMillis() : playWav2.lengthMillis();
-  if (totalMs == 0) return;
-
-  uint32_t totalSeconds = currentMs / 1000;
-  if (totalSeconds != lastUpdatedSecond) {
-    lastUpdatedSecond = totalSeconds;
-    uint32_t currentMins = totalSeconds / 60;
-    uint32_t currentSecs = totalSeconds % 60;
-    uint32_t totalTrackSeconds = totalMs / 1000;
-    uint32_t totalTrackMins = totalTrackSeconds / 60;
-    uint32_t totalTrackSecs = totalTrackSeconds % 60;
-
-    char timeBuf[32];
-    sprintf(timeBuf, "%02lu:%02lu / %02lu:%02lu", currentMins, currentSecs, totalTrackMins, totalTrackSecs);
-
-    // 🚀 PRO MATH: Calculate precise tracking layout width for Scale 1 bespoke font
-    // 5px character content + 1px spacing trailing pad = 6px stride per character.
-    int len = strlen(timeBuf);
-    int timeStringWidth = (len * 6) - 1;  // Snug rightmost bit-edge clearance
-
-    // 🚀 THE HARMONIZATION FIX: Instead of tft.print, route it through our 5x5 engine!
-    // Draws right-justified at X = 465 minus our exact calculated font layout width
-    int timeX = 465 - timeStringWidth;
-    int dummyTimeY = 0;
-
-    drawWrappedTextLine(timeBuf, timeX, 216, timeStringWidth + 2, 1, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 0, 1, dummyTimeY);
-  }
-
-  uint16_t newPixelWidth = ((float)currentMs / (float)totalMs) * pBarMaxWidth;
-  if (newPixelWidth != lastProgressPixelWidth) {
-    if (newPixelWidth > lastProgressPixelWidth) {
-      tft.fillRect(pBarX + lastProgressPixelWidth, pBarY, newPixelWidth - lastProgressPixelWidth, pBarHeight, COLOR_RAMS_ORANGE);
-    } else {
-      tft.fillRect(pBarX, pBarY, pBarMaxWidth, pBarHeight, COLOR_RAMS_DIVIDER);
-    }
-    lastProgressPixelWidth = newPixelWidth;
-  }
-}
-
 bool readTouchPanel(uint16_t& x, uint16_t& y) {
   Wire.beginTransmission(FT6336U_ADDR);
   Wire.write(0x02);
@@ -405,7 +390,6 @@ bool readTouchPanel(uint16_t& x, uint16_t& y) {
   y = 320 - rawX;
   return true;
 }
-
 void processTouchControls() {
   if (currentUIState == STATE_MENU) {
     processMenuTouch();
@@ -449,16 +433,15 @@ void processTouchControls() {
             isMediaPlaying = false;
             isMediaPaused = false;
             updatePlayPauseButtonLabel(">", COLOR_RAMS_CARD);
-            tft.setFont(NULL);
-            tft.setTextSize(1);
-            const char* resetTimeBuf = "00:00 / 00:00";
-            int16_t x1, y1;
-            uint16_t tw, th;
-            tft.getTextBounds(resetTimeBuf, 0, 0, &x1, &y1, &tw, &th);
-            tft.fillRect(465 - tw, 215, tw, th + 2, COLOR_RAMS_BG);
-            tft.setTextColor(COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG);
-            tft.setCursor(465 - tw, 215);
-            tft.print(resetTimeBuf);
+            char resetTimeBuf[32] = "00:00 / 00:00";
+            int len = strlen(resetTimeBuf);
+            int timeStringWidth = 0;
+            for (int k = 0; k < len; k++) { timeStringWidth += (getBespokeCharWidth(resetTimeBuf[k]) + 1) * 1; }
+            timeStringWidth -= 1;
+            int timeX = 465 - timeStringWidth;
+            int dummyTimeY = 0;
+            tft.fillRect(timeX - 2, 216, timeStringWidth + 4, 6, COLOR_RAMS_BG);
+            drawWrappedTextLine(resetTimeBuf, timeX, 216, timeStringWidth + 2, 1, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 0, 1, dummyTimeY);
             updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
           }
         } else if (i == 3) {

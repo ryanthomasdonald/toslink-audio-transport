@@ -10,90 +10,80 @@
 
 void setup() {
   // =========================================================================
-  // 🚀 PHASE 0: PARASITIC POWER PURGE (The Hard Drain)
+  // 🚀 PHASE 1: MASSIVE SD HARDWARE POWER INTEGRITY WINDOW
   // =========================================================================
-  // Before doing ANYTHING, take the physical I2C pins and clamp them to ground.
-  // This drains any parasitic voltage the touch chip is stealing from the long lines.
-  pinMode(18, OUTPUT);
-  digitalWrite(18, LOW);  // Force SDA to Ground
-  pinMode(19, OUTPUT);
-  digitalWrite(19, LOW);  // Force SCL to Ground
-  pinMode(9, OUTPUT);
-  digitalWrite(9, LOW);  // Force LCD RST to Ground
-
-  // Hold everything hard-grounded for 350ms to completely clear the lines
-  delay(350);
-
-  // Release the lines back to input states before drivers execute
-  pinMode(18, INPUT);
-  pinMode(19, INPUT);
-  pinMode(9, INPUT);
-
-  // Resume standard boot timing buffer
-  delay(500);
+  // High-capacity 512GB SDXC cards contain internal microcontroller cores that
+  // consume substantial peak current spikes upon mounting. We extend the initial
+  // boot cushion to 1200ms to let your breadboard rails stabilize completely.
+  delay(1200);
   Serial.begin(115200);
 
-  initAudioSystem();
-
-  bool systemReady = false;
-  int retryCount = 0;
-
-  while (!systemReady && retryCount < 5) {
-    initDisplaySystem();
-
-    drawBootLoadingScreen();
-    tft.setCursor(180, 185);
-    tft.setTextColor(COLOR_RAMS_ORANGE);
-    tft.setTextSize(1);
-
-    if (retryCount > 0) {
-      tft.printf("SYSTEM RECOVERY: ATTEMPT %d/5", retryCount + 1);
-    } else {
-      tft.print("INITIALIZING HARDWARE...");
-    }
-
-    // Handshake Check
-    Wire.beginTransmission(FT6336U_ADDR);
-    if (Wire.endTransmission(true) == 0) {
-      systemReady = true;
-      Wire.setClock(400000);
-      Serial.println("SYSTEM: Touch Hardware Recovered!");
-    } else {
-      Serial.printf("WARNING: Handshake Failed (Attempt %d). Retrying...\n", retryCount + 1);
-      retryCount++;
-      delay(400);
-    }
-  }
-
-  if (!systemReady) {
-    tft.fillRect(0, 180, 480, 40, COLOR_RAMS_BG);
-    tft.setCursor(140, 185);
-    tft.setTextColor(0xF800);
-    tft.print("BROWNOUT DETECTED - DRAINING RESIDUAL POWER");
-
-    Wire.end();
-    pinMode(18, OUTPUT);
-    digitalWrite(18, LOW);
-    pinMode(19, OUTPUT);
-    digitalWrite(19, LOW);
-    delay(1500);
-
-    RESTART_TEENSY();
-  }
-
+  // =========================================================================
+  // 🚀 PHASE 2: STORAGE BUS PRIORITIZATION
+  // =========================================================================
+  // We initialize the high-speed 4-bit SDIO card interface FIRST. This isolates
+  // the heavy electrical inrush current of mounting the 512GB file system,
+  // ensuring the power rails are completely flat before the display bus wakes up.
   if (!(SD.begin(BUILTIN_SDCARD))) {
+    Serial.println("CRITICAL: Built-in 512GB SD Card hardware initialization failed!");
+
+    // Safety Fallback: Attempt a basic display wake-up to report the mount error visually
+    initDisplaySystem();
     tft.fillScreen(COLOR_RAMS_BG);
     tft.setCursor(20, 150);
     tft.setTextColor(COLOR_RAMS_ORANGE);
     tft.print("SD CARD ERROR");
     while (1) { delay(100); }
   }
+  Serial.println("SYSTEM: 512GB SD Card hardware initialized successfully.");
 
+  // =========================================================================
+  // 🚀 PHASE 3: SCREEN DISPLAY & AUDIO BUS SUB-SYSTEM ACTIVATION
+  // =========================================================================
+  initDisplaySystem();  // Starts display at 30MHz to defend against long jumper lines
+  initAudioSystem();    // Instantiates native digital audio output routing
+
+  // Immediately draw the minimal loading screen with our polished 5x5 font engine
+  drawBootLoadingScreen();
+
+  // =========================================================================
+  // 🚀 PHASE 4: DEFENSIVE TOUCH BUS HANDSHAKE INTERLOCK
+  // =========================================================================
+  Serial.println("SYSTEM: Polling touch controller availability...");
+  bool touchReady = false;
+  uint32_t touchTimeoutStart = millis();
+
+  while (!touchReady && (millis() - touchTimeoutStart < 2000)) {
+    Wire.beginTransmission(FT6336U_ADDR);
+    // If the touch chip replies with a clean hardware ACK (0), the bus is safe
+    if (Wire.endTransmission(true) == 0) {
+      touchReady = true;
+      Serial.println("SYSTEM: Touch panel acknowledged I2C bus cleanly.");
+    }
+    delay(20);  // Minor timing delay loop to prevent voltage rail hammering
+  }
+
+  if (!touchReady) {
+    Serial.println("WARNING: Touch panel initialization timed out! Operating blind.");
+  }
+
+  // =========================================================================
+  // 🚀 PHASE 5: RECURSIVE FILE-TREE LIBRARY INDEXING
+  // =========================================================================
+  // Safely parse through your massive CD audio collection folders now that
+  // both peripheral hardware power buses have fully synchronized.
   buildLibraryIndex();
 
+  // =========================================================================
+  // 🚀 PHASE 6: INITIAL STATE INTERFACE HANDOFF
+  // =========================================================================
   currentUIState = STATE_MENU;
   currentMenuLevel = LEVEL_ARTISTS;
   menuScrollOffset = 0;
+
+  // 🚀 THE DEFENSIVE SHIELD LOCK: Force an explicit hardware state refresh
+  // to override any random electrical noise glitches right before drawing the menu!
+  refreshDisplayHardwareState();
 
   drawMenuScreen();
 }
