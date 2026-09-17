@@ -67,23 +67,25 @@ void setup() {
     Serial.println("WARNING: Touch panel initialization timed out! Operating blind.");
   }
 
-  // =========================================================================
-  // 🚀 PHASE 5: RECURSIVE FILE-TREE LIBRARY INDEXING
-  // =========================================================================
-  // Safely parse through your massive CD audio collection folders now that
-  // both peripheral hardware power buses have fully synchronized.
+  // 1. Run the heavy indexing scan that generates the electrical noise
   buildLibraryIndex();
 
-  // =========================================================================
-  // 🚀 PHASE 6: INITIAL STATE INTERFACE HANDOFF
-  // =========================================================================
+  // 🚀 ANTI-GARBAGE INTEGRITY SHIELD
+  tft.fillScreen(COLOR_RAMS_BG);
+  refreshDisplayHardwareState();
+
+  // 2. Clear state pointers and hand over control cleanly
   currentUIState = STATE_MENU;
   currentMenuLevel = LEVEL_ARTISTS;
   menuScrollOffset = 0;
 
-  // 🚀 THE DEFENSIVE SHIELD LOCK: Force an explicit hardware state refresh
-  // to override any random electrical noise glitches right before drawing the menu!
-  refreshDisplayHardwareState();
+  // 🚀 THE CRITICAL INITIALIZATION FIX:
+  // Prime our sandbox variables to look at the first folder indices instead of -1!
+  // This guarantees that the layout loops find valid album counts on their first draw.
+  extern int browseArtistIndex;
+  extern int browseAlbumIndex;
+  browseArtistIndex = 0;
+  browseAlbumIndex = 0;
 
   drawMenuScreen();
 }

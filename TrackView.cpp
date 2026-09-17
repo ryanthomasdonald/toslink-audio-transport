@@ -2,89 +2,62 @@
 #include "DisplayUI.h"
 #include "AudioEngine.h"
 
-static String persistArtistPath = "";
-static String persistAlbumPath = "";
+// 🚀 EXPLICIT LAYER EXPOSURE
+extern int browseArtistIndex;
+extern int browseAlbumIndex;
 
 void drawTrackView() {
+  refreshDisplayHardwareState();
   tft.fillScreen(COLOR_RAMS_BG);
+  int dummyNextY = 0;
 
-  // 1. Structural Header Block
   tft.fillRect(0, 0, 480, 45, COLOR_RAMS_CARD);
   tft.drawFastHLine(0, 45, 480, COLOR_RAMS_DIVIDER);
-  tft.setTextColor(COLOR_RAMS_ORANGE);
-  tft.setTextSize(2);
-  tft.setCursor(15, 15);
+  drawWrappedTextLine("SELECT TRACK", 15, 19, 320, 2, COLOR_RAMS_ORANGE, COLOR_RAMS_CARD, 0, 1, dummyNextY);
 
-  String albumHeader = String(library[selectedArtistIndex].albums[selectedAlbumIndex].name);
-  albumHeader.toUpperCase();
-  tft.print(albumHeader.c_str());
+  tft.fillRect(360, 45, 120, 92, COLOR_RAMS_CARD);
+  tft.drawRect(360, 45, 120, 92, COLOR_RAMS_DIVIDER);
+  drawWrappedTextLine("BACK", 396, 81, 100, 2, COLOR_RAMS_WHITE, COLOR_RAMS_CARD, 0, 1, dummyNextY);
 
-  // 2. PERFECT FULL-SCREEN GRID SIDE NAVIGATION STACK (Flush & Touching)
-  // BACK Button (Exactly 92px tall)
-  tft.fillRect(340, 45, 140, 92, COLOR_RAMS_CARD);
-  tft.drawRect(340, 45, 140, 92, COLOR_RAMS_DIVIDER);
-  tft.setTextColor(COLOR_RAMS_WHITE);
-  tft.setTextSize(2);
-  tft.setCursor(385, 81);
-  tft.print("BACK");
+  int midX = 360 + (120 / 2);
+  int midY1 = 137 + (92 / 2);
+  tft.fillRect(360, 137, 120, 92, COLOR_RAMS_CARD);
+  tft.drawRect(360, 137, 120, 92, COLOR_RAMS_DIVIDER);
+  tft.fillTriangle(midX, midY1 - 10, midX - 12, midY1 + 6, midX + 12, midY1 + 6, COLOR_RAMS_WHITE);
 
-  // PG UP Button (Exactly 92px tall)
-  tft.fillRect(340, 137, 140, 92, COLOR_RAMS_CARD);
-  tft.drawRect(340, 137, 140, 92, COLOR_RAMS_DIVIDER);
-  tft.setCursor(380, 173);
-  tft.print("PG UP");
+  int midY2 = 229 + (91 / 2);
+  tft.fillRect(360, 229, 120, 91, COLOR_RAMS_CARD);
+  tft.drawRect(360, 229, 120, 91, COLOR_RAMS_DIVIDER);
+  tft.fillTriangle(midX, midY2 + 10, midX - 12, midY2 - 6, midX + 12, midY2 - 6, COLOR_RAMS_WHITE);
 
-  // PG DN Button (Exactly 91px tall to hit bottom edge at 320)
-  tft.fillRect(340, 229, 140, 91, COLOR_RAMS_CARD);
-  tft.drawRect(340, 229, 140, 91, COLOR_RAMS_DIVIDER);
-  tft.setCursor(380, 265);
-  tft.print("PG DN");
+  // 🚀 THE REDIRECT FIX: Target browse registers to look up track entries safely
+  int trackCount = library[browseArtistIndex].albums[browseAlbumIndex].trackCount;
 
-  // 3. PIXEL-PERFECT LIST LAYER (5 items @ 55px completely fills 45 to 320)
-  int trackCount = library[selectedArtistIndex].albums[selectedAlbumIndex].trackCount;
   if (trackCount == 0) {
-    tft.setTextColor(COLOR_RAMS_TEXT_MUTE);
-    tft.setCursor(30, 120);
-    tft.print("EMPTY");
+    drawWrappedTextLine("EMPTY", 30, 120, 200, 2, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 0, 1, dummyNextY);
   } else {
     for (int i = 0; i < 5; i++) {
       int itemIndex = menuScrollOffset + i;
       int boxY = 45 + (i * 55);
 
       if (itemIndex >= trackCount) {
-        tft.fillRect(0, boxY, 340, 55, COLOR_RAMS_BG);
-        tft.drawRect(0, boxY, 340, 55, COLOR_RAMS_DIVIDER);
+        tft.fillRect(0, boxY, 360, 55, COLOR_RAMS_BG);
+        tft.drawRect(0, boxY, 360, 55, COLOR_RAMS_DIVIDER);
         continue;
       }
 
-      tft.fillRect(0, boxY, 340, 55, COLOR_RAMS_CARD);
-      tft.drawRect(0, boxY, 340, 55, COLOR_RAMS_DIVIDER);
-      tft.fillRect(10, boxY + 24, 8, 8, COLOR_RAMS_ORANGE);
+      tft.fillRect(0, boxY, 360, 55, COLOR_RAMS_CARD);
+      tft.drawRect(0, boxY, 360, 55, COLOR_RAMS_DIVIDER);
+      tft.fillRect(12, boxY + 24, 8, 8, COLOR_RAMS_ORANGE);
 
-      // Strip numeric sorting prefixes (e.g. "01_") and extensions
-      String cleanTrack = String(library[selectedArtistIndex].albums[selectedAlbumIndex].tracks[itemIndex].filename);
-      if (cleanTrack.length() > 3) cleanTrack = cleanTrack.substring(3);
-      if (cleanTrack.endsWith(".wav") || cleanTrack.endsWith(".WAV")) {
-        cleanTrack = cleanTrack.substring(0, cleanTrack.length() - 4);
+      String nameStr = "";
+      if (library[browseArtistIndex].albums[browseAlbumIndex].tracks[itemIndex].filename != NULL) {
+        nameStr = String(library[browseArtistIndex].albums[browseAlbumIndex].tracks[itemIndex].filename);
       }
-      cleanTrack.toUpperCase();
-
-      int16_t x1, y1;
-      uint16_t tw, th;
-      tft.setTextSize(2);
-      tft.getTextBounds(cleanTrack.c_str(), 32, boxY + 20, &x1, &y1, &tw, &th);
-      while (tw > 290 && cleanTrack.length() > 4) {
-        cleanTrack = cleanTrack.substring(0, cleanTrack.length() - 1);
-        String testStr = cleanTrack + "...";
-        tft.getTextBounds(testStr.c_str(), 32, boxY + 20, &x1, &y1, &tw, &th);
-      }
-      if (tw <= 290 && cleanTrack.length() < (strlen(library[selectedArtistIndex].albums[selectedAlbumIndex].tracks[itemIndex].filename) - 7)) {
-        cleanTrack += "...";
-      }
-
-      tft.setTextColor(COLOR_RAMS_WHITE);
-      tft.setCursor(32, boxY + 20);
-      tft.print(cleanTrack.c_str());
+      if (nameStr.length() > 3) nameStr = nameStr.substring(3);
+      if (nameStr.endsWith(".wav") || nameStr.endsWith(".WAV")) { nameStr = nameStr.substring(0, nameStr.length() - 4); }
+      nameStr.toUpperCase();
+      drawWrappedTextLine(nameStr.c_str(), 34, boxY + 22, 310, 2, COLOR_RAMS_WHITE, COLOR_RAMS_CARD, 0, 1, dummyNextY);
     }
   }
 }
@@ -92,11 +65,11 @@ void drawTrackView() {
 void processTrackViewTouch() {
   static bool lastTouchState = false;
   bool currentTouch = readTouchPanel(touchX, touchY);
-  int trackCount = library[selectedArtistIndex].albums[selectedAlbumIndex].trackCount;
+  int trackCount = library[browseArtistIndex].albums[browseAlbumIndex].trackCount;
+
   if (currentTouch && !lastTouchState) {
-    // Navigation Column Grid-Hit Geometry
-    if (touchX >= 340 && touchX <= 480) {
-      if (touchY >= 45 && touchY <= 136) {  // BACK
+    if (touchX >= 360 && touchX <= 480) {
+      if (touchY >= 45 && touchY <= 136) {  // BACK BUTTON
         menuScrollOffset = 0;
         currentMenuLevel = LEVEL_ALBUMS;
         drawAlbumView();
@@ -113,41 +86,48 @@ void processTrackViewTouch() {
       }
     }
 
-    // List Content Rows Grid-Hit Geometry
-    if (touchX >= 0 && touchX <= 340) {
+    if (touchX >= 0 && touchX <= 360) {
       for (int i = 0; i < 5; i++) {
         int itemIndex = menuScrollOffset + i;
         if (itemIndex >= trackCount) break;
-
         int boxY = 45 + (i * 55);
         if (touchY >= boxY && touchY <= (boxY + 55)) {
+
           playWav1.stop();
           playWav2.stop();
+          delay(10);
 
-          persistArtistPath = String(library[selectedArtistIndex].name) + "/";
-          persistAlbumPath = String(library[selectedArtistIndex].albums[selectedAlbumIndex].name) + "/";
-
-          strncpy(currentArtistFolder, persistArtistPath.c_str(), PATH_BUFFER_SIZE - 1);
-          currentArtistFolder[PATH_BUFFER_SIZE - 1] = '\0';
-          strncpy(currentAlbumFolder, persistAlbumPath.c_str(), PATH_BUFFER_SIZE - 1);
-          currentAlbumFolder[PATH_BUFFER_SIZE - 1] = '\0';
-
-          AlbumEntry* activeAlbum = &library[selectedArtistIndex].albums[selectedAlbumIndex];
-          if (activeAlbum->artworkFilename != NULL) {
-            String targetImgPath = String("/") + String(library[selectedArtistIndex].name) + "/" + String(activeAlbum->name) + "/" + String(activeAlbum->artworkFilename);
-            cacheActiveAlbumArtwork(targetImgPath);
-          } else {
-            activeArtworkLoaded = false;
-          }
-
-          scanCurrentAlbumFolder();
+          // 🚀 THE COMMIT INTERLOCK PASS: True active track selection confirmed!
+          // Transfer our isolated browse coordinates over to your active playing variables.
+          selectedArtistIndex = browseArtistIndex;
+          selectedAlbumIndex = browseAlbumIndex;
           currentTrackIndex = itemIndex;
 
-          extern UIState currentUIState;
+          populateTrackQueue();
+
+          String folderPath = "/" + String(library[selectedArtistIndex].name) + "/" + String(library[selectedArtistIndex].albums[selectedAlbumIndex].name) + "/";
+          strncpy(currentAlbumAbsolutePath, folderPath.c_str(), sizeof(currentAlbumAbsolutePath) - 1);
+          currentAlbumAbsolutePath[sizeof(currentAlbumAbsolutePath) - 1] = '\0';
+
+          if (library[selectedArtistIndex].name != NULL) {
+            snprintf(currentArtistFolder, sizeof(currentArtistFolder), "%s", library[selectedArtistIndex].name);
+          }
+
+          // 🚀 THE META SYNC FIX: Correctly point the indexer to the nested album string array cell!
+          if (library[selectedArtistIndex].albums[selectedAlbumIndex].name != NULL) {
+            snprintf(currentAlbumFolder, sizeof(currentAlbumFolder), "%s", library[selectedArtistIndex].albums[selectedAlbumIndex].name);
+          }
+
+          String artworkPath = folderPath + String(library[selectedArtistIndex].albums[selectedAlbumIndex].artworkFilename);
+          cacheActiveAlbumArtwork(artworkPath);
+
           currentUIState = STATE_PLAYER;
           drawAudioDashboard();
-          updatePlayPauseButtonLabel("||", COLOR_RAMS_CARD);
+          updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
+
+          delay(150);
           playFreshAlbumStart();
+          updatePlayPauseButtonLabel("||", COLOR_RAMS_CARD);
           break;
         }
       }

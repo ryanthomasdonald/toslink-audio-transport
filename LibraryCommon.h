@@ -4,60 +4,47 @@
 #include <Arduino.h>
 #include "DisplayUI.h"
 
-#define MAX_ARTISTS_TOTAL 180
+#define MAX_TRACKS_PER_ALBUM 30
 #define MAX_ALBUMS_PER_ARTIST 20
-#define MAX_TRACKS_PER_ALBUM 35
+#define MAX_ARTISTS 150
 
+// 🚀 DYNAMIC DATA STRUCTURES: We store strings as lean heap pointers (char*)
+// instead of massive static character arrays (char[64])
 struct TrackEntry {
-  char* filename;
+  char* filename;  // Dynamically allocated on boot
 };
 
 struct AlbumEntry {
   char* name;
-  int trackCount;
-  TrackEntry* tracks;
   char* artworkFilename;
+  TrackEntry tracks[MAX_TRACKS_PER_ALBUM];
+  int trackCount;
 };
 
 struct ArtistEntry {
   char* name;
+  AlbumEntry albums[MAX_ALBUMS_PER_ARTIST];
   int albumCount;
-  AlbumEntry* albums;
 };
 
-enum UIState {
-  STATE_PLAYER,
-  STATE_MENU
-};
-
-enum MenuLevel {
-  LEVEL_ARTISTS,
-  LEVEL_ALBUMS,
-  LEVEL_TRACKS
-};
-
-extern UIState currentUIState;
-extern MenuLevel currentMenuLevel;
-extern ArtistEntry library[MAX_ARTISTS_TOTAL];
+// Expose our optimized global index variables
+extern ArtistEntry* library;  // Dynamically allocated pointer table array
 extern int libraryArtistCount;
+
 extern int selectedArtistIndex;
 extern int selectedAlbumIndex;
-extern int menuScrollOffset;
+extern int currentTrackIndex;
+extern int totalTracks;
+extern bool activeEngineIsA;
 
-// 🚀 SCALED TO 200x200 FOR THE GREATER SCREEN FOOTPRINT
-extern uint16_t activeArtworkCache[200 * 200];
-extern bool activeArtworkLoaded;
+// Bounded global path caches
+extern char currentAlbumAbsolutePath[256];
+extern char trackQueue[MAX_TRACKS_PER_ALBUM][96];
 
+// Master Function Pipeline Declarations
+void initLibrarySystem();
 void buildLibraryIndex();
+void populateTrackQueue();
 void cacheActiveAlbumArtwork(String path);
-void drawMenuSideButton(int x, int y, int w, int h, const char* label, uint16_t color);
-void drawMenuScreen();
-void processMenuTouch();
-void drawArtistView();
-void processArtistViewTouch();
-void drawAlbumView();
-void processAlbumViewTouch();
-void drawTrackView();
-void processTrackViewTouch();
 
 #endif

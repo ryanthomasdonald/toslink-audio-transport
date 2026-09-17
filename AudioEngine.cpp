@@ -1,12 +1,15 @@
 #include "AudioEngine.h"
 #include "DisplayUI.h"
+#include "LibraryCommon.h"
 #include <SD.h>
 
-// Standard mutable array instantiation matching our header specifications
-char currentArtistFolder[PATH_BUFFER_SIZE] = "Kaddisfly/";
-char currentAlbumFolder[PATH_BUFFER_SIZE] = "Set Sail the Prarie/";
+// Standard paths retain their boundary tracking definitions
+char currentArtistFolder[PATH_BUFFER_SIZE] = "";
+char currentAlbumFolder[PATH_BUFFER_SIZE] = "";
 
-// Instantiations matching our master header parameters
+extern char currentAlbumAbsolutePath[256];
+
+// Instantiations matching our master header parameters exactly
 char trackQueue[30][96];
 int totalTracks = 0;
 int currentTrackIndex = 0;
@@ -14,6 +17,8 @@ bool isMediaPlaying = false;
 bool isMediaPaused = false;
 bool activeEngineIsA = true;
 bool nextTrackPreLaunched = false;
+
+EngineLifecycleState activeEngineState = ENGINE_IDLE;
 
 AudioPlaySdWav playWav1;
 AudioPlaySdWav playWav2;
@@ -36,80 +41,65 @@ void initAudioSystem() {
   audioMixerR.gain(1, 0.0);
 }
 
-void scanCurrentAlbumFolder() {
-  totalTracks = 0;
-  currentTrackIndex = 0;
-  String fullPath = String(currentArtistFolder) + String(currentAlbumFolder);
-  File dir = SD.open(fullPath.c_str());
-  if (!dir) {
-    Serial.printf("Scanner Error: Cannot open folder directory: %s\n", fullPath.c_str());
-    return;
-  }
-  while (true) {
-    File entry = dir.openNextFile();
-    if (!entry) break;
-    if (!entry.isDirectory()) {
-      String name = String(entry.name());
-      if (name.endsWith(".wav") || name.endsWith(".WAV")) {
-        if (totalTracks < 30) {
-          name.toCharArray(trackQueue[totalTracks], 96);  // 🚀 Expanded buffer ceiling from 64 to 96
-          totalTracks++;
-        }
-      }
-    }
-    entry.close();
-  }
-  dir.close();
-
-  // Alphabetical sort to keep your audio tracks strictly sequential (01, 02, 03...)
-  for (int i = 0; i < totalTracks - 1; i++) {
-    for (int j = i + 1; j < totalTracks; j++) {
-      if (strcmp(trackQueue[i], trackQueue[j]) > 0) {
-        char temp[64];
-        strcpy(temp, trackQueue[i]);
-        strcpy(trackQueue[i], trackQueue[j]);
-        strcpy(trackQueue[j], temp);
-      }
-    }
-  }
-  Serial.printf("Scanner Engine: Success. Loaded %d audio tracks from nested directory.\n", totalTracks);
-}
-
 void playFreshAlbumStart() {
   playWav1.stop();
   playWav2.stop();
-  if (totalTracks == 0) return;
-  activeEngineIsA = true;
-  nextTrackPreLaunched = false;
-  resetProgressTrackers();
-  audioMixerL.gain(0, 1.0);
-  audioMixerL.gain(1, 0.0);
-  audioMixerR.gain(0, 1.0);
-  audioMixerR.gain(1, 0.0);
-  String fullPath = String(currentArtistFolder) + String(currentAlbumFolder) + trackQueue[currentTrackIndex];
-  if (playWav1.play(fullPath.c_str())) {
-    isMediaPlaying = true;
-    isMediaPaused = false;
+  delay(10);
 
-    // 🚀 FIX CONFIRMED: Forces vector twin-bars icon onto the deck on fresh boot/select
-    updatePlayPauseButtonLabel("||", COLOR_RAMS_CARD);
-    updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
-  } else {
-    updateTrackWindow(currentTrackIndex + 1, "FILE NOT FOUND");
+  // Combine the absolute folder path with our solid pre-sorted RAM queue filename
+  char fullTrackExecutionPath[384];
+  snprintf(fullTrackExecutionPath, sizeof(fullTrackExecutionPath), "%s%s",
+           currentAlbumAbsolutePath, trackQueue[currentTrackIndex]);
+
+  Serial.printf("AUDIO ENGINE: Stream initialized targeting: %s\n", fullTrackExecutionPath);
+
+  // Synchronize text string caches for our display views
+  if (selectedArtistIndex >= 0 && selectedAlbumIndex >= 0) {
+    if (library[selectedArtistIndex].name != NULL) {
+      snprintf(currentArtistFolder, sizeof(currentArtistFolder), "%s", library[selectedArtistIndex].name);
+    }
+    if (library[selectedArtistIndex].albums[selectedAlbumIndex].name != NULL) {
+      snprintf(currentAlbumFolder, sizeof(currentAlbumFolder), "%s", library[selectedArtistIndex].albums[selectedAlbumIndex].name);
+    }
   }
+
+  AudioNoInterrupts();
+  if (activeEngineIsA) {
+    playWav1.play(fullTrackExecutionPath);
+  } else {
+    playWav2.play(fullTrackExecutionPath);
+  }
+  AudioInterrupts();
+
+  isMediaPlaying = true;
+  isMediaPaused = false;
+  nextTrackPreLaunched = false;
+
+  // 🚀 THE INTERLOCK PRIME: Arm the wake-up guard to ensure data edges settle safely
+  activeEngineState = ENGINE_WAKING_UP;
 }
 
 void preLoadNextTrack() {
   int nextTrackIndex = currentTrackIndex + 1;
   if (nextTrackIndex >= totalTracks) return;
-  String fullPath = String(currentArtistFolder) + String(currentAlbumFolder) + trackQueue[nextTrackIndex];
+
+  // Assemble the absolute folder track path for the preloaded audio stream
+  char fullTrackPreloadPath[384];
+  snprintf(fullTrackPreloadPath, sizeof(fullTrackPreloadPath), "%s%s",
+           currentAlbumAbsolutePath, trackQueue[nextTrackIndex]);
+
+  Serial.printf("AUDIO ENGINE: Preloading next track from absolute path: %s\n", fullTrackPreloadPath);
+
+  // 🚀 STAGE PRELOAD PHASE
+  activeEngineState = ENGINE_PRELOADING;
+
   if (activeEngineIsA) {
-    if (playWav2.play(fullPath.c_str())) {
+    if (playWav2.play(fullTrackPreloadPath)) {
       delay(5);
       playWav2.togglePlayPause();
     }
   } else {
-    if (playWav1.play(fullPath.c_str())) {
+    if (playWav1.play(fullTrackPreloadPath)) {
       delay(5);
       playWav1.togglePlayPause();
     }
@@ -119,52 +109,75 @@ void preLoadNextTrack() {
 void updateAudioEngine() {
   if (!isMediaPlaying) return;
   int nextTrackIndex = currentTrackIndex + 1;
-  if (activeEngineIsA) {
-    if (!nextTrackPreLaunched && nextTrackIndex < totalTracks) {
-      preLoadNextTrack();
-      nextTrackPreLaunched = true;
+
+  // =========================================================================
+  // 🚀 PHASE 1: STAGED HARDWARE DEBOUNCE MONITORING
+  // Protects the system against high-capacity 512GB SD cluster lookup lag
+  // =========================================================================
+  if (activeEngineState == ENGINE_WAKING_UP) {
+    // Look at the active hardware channel and wait until it is TRULY playing
+    bool hardwareConfirmedPlaying = activeEngineIsA ? playWav1.isPlaying() : playWav2.isPlaying();
+    if (hardwareConfirmedPlaying) {
+      activeEngineState = ENGINE_ACTIVE_PLAYING;
+      Serial.println("AUDIO ENGINE: Target channel confirmed active. Interlock released.");
     }
-    if (!playWav1.isPlaying()) {
+    return;  // Absolute lock: freeze checking track expirations until file opens
+  }
+
+  // Handle background preloading lifecycle stages cleanly
+  if (!nextTrackPreLaunched && nextTrackIndex < totalTracks) {
+    preLoadNextTrack();
+    nextTrackPreLaunched = true;
+  }
+
+  // Catch when the preloaded track successfully caches into memory staging
+  if (activeEngineState == ENGINE_PRELOADING) {
+    bool nextChannelLoaded = activeEngineIsA ? playWav2.isPlaying() : playWav1.isPlaying();
+    // If the hardware reports false, it means togglePlayPause caught the file and paused it cleanly
+    if (!nextChannelLoaded) {
+      activeEngineState = ENGINE_STAGED;
+      Serial.println("AUDIO ENGINE: Next file staging sector cached cleanly in RAM.");
+    }
+  }
+
+  // =========================================================================
+  // 🚀 PHASE 2: SAFE NATURAL CROSSOVER MONITORING
+  // =========================================================================
+  if (activeEngineState == ENGINE_STAGED || activeEngineState == ENGINE_ACTIVE_PLAYING) {
+    bool currentChannelFinished = activeEngineIsA ? !playWav1.isPlaying() : !playWav2.isPlaying();
+
+    if (currentChannelFinished) {
       if (nextTrackIndex < totalTracks) {
         AudioNoInterrupts();
-        audioMixerL.gain(0, 0.0);
-        audioMixerL.gain(1, 1.0);
-        audioMixerR.gain(0, 0.0);
-        audioMixerR.gain(1, 1.0);
+        if (activeEngineIsA) {
+          audioMixerL.gain(0, 0.0);
+          audioMixerL.gain(1, 1.0);
+          audioMixerR.gain(0, 0.0);
+          audioMixerR.gain(1, 1.0);
+          playWav2.togglePlayPause();  // Wake up Engine B
+          activeEngineIsA = false;
+        } else {
+          audioMixerL.gain(0, 1.0);
+          audioMixerL.gain(1, 0.0);
+          audioMixerR.gain(0, 1.0);
+          audioMixerR.gain(1, 0.0);
+          playWav1.togglePlayPause();  // Wake up Engine A
+          activeEngineIsA = true;
+        }
         AudioInterrupts();
-        playWav2.togglePlayPause();
+
         currentTrackIndex++;
-        activeEngineIsA = false;
         nextTrackPreLaunched = false;
+
+        // 🚀 THE INTERLOCK SHIELD: Slam the state back to waking up!
+        // This completely prevents double skips during high-latency SD read frames.
+        activeEngineState = ENGINE_WAKING_UP;
+
         updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
+        Serial.printf("AUDIO ENGINE: Crossover execution advanced to track %d\n", currentTrackIndex);
       } else {
         isMediaPlaying = false;
-        // 🚀 FIX CONFIRMED: Returns button deck cleanly to triangle vector icon
-        updatePlayPauseButtonLabel(">", COLOR_RAMS_CARD);
-        updateTrackWindow(currentTrackIndex + 1, "ALBUM FINISHED");
-      }
-    }
-  } else {
-    if (!nextTrackPreLaunched && nextTrackIndex < totalTracks) {
-      preLoadNextTrack();
-      nextTrackPreLaunched = true;
-    }
-    if (!playWav2.isPlaying()) {
-      if (nextTrackIndex < totalTracks) {
-        AudioNoInterrupts();
-        audioMixerL.gain(0, 1.0);
-        audioMixerL.gain(1, 0.0);
-        audioMixerR.gain(0, 1.0);
-        audioMixerR.gain(1, 0.0);
-        AudioInterrupts();
-        playWav1.togglePlayPause();
-        currentTrackIndex++;
-        activeEngineIsA = true;
-        nextTrackPreLaunched = false;
-        updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
-      } else {
-        isMediaPlaying = false;
-        // 🚀 FIX CONFIRMED: Returns button deck cleanly to triangle vector icon
+        activeEngineState = ENGINE_IDLE;
         updatePlayPauseButtonLabel(">", COLOR_RAMS_CARD);
         updateTrackWindow(currentTrackIndex + 1, "ALBUM FINISHED");
       }
