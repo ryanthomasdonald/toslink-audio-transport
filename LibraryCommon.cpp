@@ -95,22 +95,15 @@ void buildLibraryIndex() {
               while (true) {
                 File trackFile = albumDir.openNextFile();
                 if (!trackFile) break;
-
                 if (!trackFile.isDirectory()) {
                   String fname = String(trackFile.name());
                   String upperFName = fname;
                   upperFName.toUpperCase();  // 🚀 Fixed case variable typo
-
-                  // 🚀 THE FILENAME INTEGRITY SHIELD:
-                  // 1. Must end strictly in your CD audio ".WAV" extension.
-                  // 2. The very first character slot [0] must be a valid digit ('0'-'9')
-                  // This strips out OS sidecar files (like "._01.wav") immediately!
                   if (upperFName.endsWith(".WAV") && (fname[0] >= '0' && fname[0] <= '9')) {
                     if (currentAlbum->trackCount >= MAX_TRACKS_PER_ALBUM) {
                       trackFile.close();
                       break;
                     }
-
                     TrackEntry* currentTrack = &currentAlbum->tracks[currentAlbum->trackCount];
                     currentTrack->filename = allocateString(trackFile.name());
                     currentAlbum->trackCount++;
@@ -120,14 +113,12 @@ void buildLibraryIndex() {
               }
               albumDir.close();
             }
-
             currentArtist->albumCount++;
           }
           albumFolder.close();
         }
         artistDir.close();
       }
-
       libraryArtistCount++;
     }
     artistFolder.close();
