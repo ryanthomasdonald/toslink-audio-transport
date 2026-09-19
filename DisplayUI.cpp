@@ -259,21 +259,57 @@ void updateTrackWindow(int trackNum, const char* trackTitle) {
 void handleLiveTimeAndProgressBar() {
   if (!isMediaPlaying) return;
 
-  // 🚀 THE MICRO-SLICE FIX: Calculate exactly how many seconds have elapsed
-  // based on our read pointer's step positioning across the bitstream array!
-  // CD stereo audio consumes exactly 176,400 bytes per second.
-  extern volatile uint32_t ringReadPointer;
+  // Access our active non-wrapping track byte counter and storage files
+  extern volatile uint32_t absoluteTrackBytesPlayed;
+  extern File activeAudioFile;
 
-  uint32_t totalElapsedSeconds = ringReadPointer / 176400;
-  uint32_t mins = totalElapsedSeconds / 60;
-  uint32_t secs = totalElapsedSeconds % 60;
+  // 1. Calculate Elapsed Time Metrics (176,400 bytes per second for CD Stereo)
+  uint32_t totalElapsedSeconds = absoluteTrackBytesPlayed / 176400;
+  uint32_t elapsedMins = totalElapsedSeconds / 60;
+  uint32_t elapsedSecs = totalElapsedSeconds % 60;
 
-  // Render text string to the UI display canvas
-  char timeBuffer[32];
+  // 2. Prevent UI Screen Hammering: Only repaint if the second integer ticks over
+  if (elapsedSecs != lastUpdatedSecond) {
+    lastUpdatedSecond = elapsedSecs;
 
-  snprintf(timeBuffer, sizeof(timeBuffer), "%02u:%02u", (unsigned int)mins, (unsigned int)secs);
+    // Calculate Total Track Duration directly from the file size!
+    uint32_t totalTrackBytes = activeAudioFile.size() - 44;
+    uint32_t totalTrackSeconds = totalTrackBytes / 176400;
+    uint32_t totalMins = totalTrackSeconds / 60;
+    uint32_t totalSecs = totalTrackSeconds % 60;
 
-  // (Your existing tft string printing and progress bar slider draw steps go right below here...)
+    // Synthesize the full composite readout as a single text block
+    char timeBuffer[32];
+    snprintf(timeBuffer, sizeof(timeBuffer), "%02u:%02u / %02u:%02u",
+             (unsigned int)elapsedMins, (unsigned int)elapsedSecs,
+             (unsigned int)totalMins, (unsigned int)totalSecs);
+
+    // 🚀 THE ALIGNMENT FIX:
+    // Start at X = 394 and restrict width to 71 to force the block to sit perfectly
+    // right-aligned, flush with the 465px edge of our progress bar boundary lines!
+    int dummyTimeY = 0;
+    tft.fillRect(394, 216, 71, 10, COLOR_RAMS_BG);  // Wipe out old text row cleanly to prevent ghosting
+    drawWrappedTextLine(timeBuffer, 394, 216, 71, 1, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 0, 1, dummyTimeY);
+
+    // =========================================================================
+    // 3. PROGRESS BAR MATHEMATICS
+    // =========================================================================
+    if (totalTrackBytes > 0) {
+      uint16_t currentProgressPixelWidth = ((uint64_t)absoluteTrackBytesPlayed * pBarMaxWidth) / totalTrackBytes;
+
+      if (currentProgressPixelWidth > pBarMaxWidth) currentProgressPixelWidth = pBarMaxWidth;
+
+      if (currentProgressPixelWidth != lastProgressPixelWidth) {
+        lastProgressPixelWidth = currentProgressPixelWidth;
+
+        // Paint the hot active tracking line (Orange)
+        tft.fillRect(pBarX, pBarY, currentProgressPixelWidth, pBarHeight, COLOR_RAMS_ORANGE);
+
+        // Paint the remaining empty buffer tracking space (Divider Mute Color)
+        tft.fillRect(pBarX + currentProgressPixelWidth, pBarY, pBarMaxWidth - currentProgressPixelWidth, pBarHeight, COLOR_RAMS_DIVIDER);
+      }
+    }
+  }
 }
 
 void drawTransportButton(UI_Button btn) {

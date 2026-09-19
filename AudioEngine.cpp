@@ -12,6 +12,9 @@ extern volatile int activeRefillBank;
 extern EngineLifecycleState activeEngineState;
 extern bool nextTrackPreLaunched;
 
+// 🚀 THE TIMING FIX ACCUMULATOR: Tracks true absolute bytes sent for the current track
+volatile uint32_t absoluteTrackBytesPlayed = 0;
+
 // Standard paths retain their boundary tracking definitions
 char currentArtistFolder[PATH_BUFFER_SIZE] = "";
 char currentAlbumFolder[PATH_BUFFER_SIZE] = "";
@@ -25,7 +28,7 @@ bool isMediaPlaying = false;
 bool isMediaPaused = false;
 bool activeEngineIsA = true;
 
-// 🚀 Instantiate parallel queues to handle true synchronized Stereo!
+// Instantiate parallel queues to handle true synchronized Stereo!
 AudioPlayQueue queueLeft;
 AudioPlayQueue queueRight;
 AudioOutputSPDIF3 spdifOut;
@@ -34,7 +37,7 @@ AudioOutputSPDIF3 spdifOut;
 AudioConnection patchCord1(queueLeft, 0, spdifOut, 0);
 AudioConnection patchCord2(queueRight, 0, spdifOut, 1);
 
-// 🚀 Allocate our massive 8MB Circular Ring Buffer directly into external PSRAM space
+// Allocate our massive 8MB Circular Ring Buffer directly into external PSRAM space
 #define BANK_SIZE_BYTES (1024 * 1024 * 4)
 #define TOTAL_BUFFER_SIZE (BANK_SIZE_BYTES * 2)
 EXTMEM char circularAudioBuffer[TOTAL_BUFFER_SIZE];
@@ -133,6 +136,9 @@ void playFreshAlbumStart() {
   activeRefillBank = 0;
   currentBankWriteProgressBytes = 0;
 
+  // 🚀 THE TIMING FIX: Reset absolute progress bytes cleanly for this fresh manual track selection
+  absoluteTrackBytesPlayed = 0;
+
   isMediaPlaying = true;
   isMediaPaused = false;
   nextTrackPreLaunched = false;
@@ -201,7 +207,7 @@ void updateAudioEngine() {
     if (dmaBufferSlotL != NULL && dmaBufferSlotR != NULL) {
       uint32_t* stereoFrameSource = (uint32_t*)&circularAudioBuffer[ringReadPointer];
 
-      // 🚀 THE VERIFIED LITTLE-ENDIAN ALIGNMENT MATRIX:
+      // 🚀 LITTLE-ENDIAN ALIGNMENT MATRIX:
       // Low 16-bits hold the Left channel, High 16-bits hold Right!
       for (int i = 0; i < 128; i++) {
         uint32_t packedWord = stereoFrameSource[i];
@@ -211,6 +217,9 @@ void updateAudioEngine() {
 
       queueLeft.playBuffer();
       queueRight.playBuffer();
+
+      // 🚀 THE TIMING FIX: Accumulate progress bytes sequentially for this current active song!
+      absoluteTrackBytesPlayed += 512;
 
       static int lastTrackIndexTracked = -1;
       if (currentTrackIndex != lastTrackIndexTracked) {
