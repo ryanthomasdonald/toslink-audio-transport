@@ -259,9 +259,12 @@ void updateTrackWindow(int trackNum, const char* trackTitle) {
 void handleLiveTimeAndProgressBar() {
   if (!isMediaPlaying) return;
 
-  // Access our active non-wrapping track byte counter and storage files
+  // Access our active non-wrapping track byte counter and storage properties
   extern volatile uint32_t absoluteTrackBytesPlayed;
-  extern File activeAudioFile;
+  extern int activePlaybackTrackIndex;  // 🚀 THE DECOUPLING SHIELD
+  extern int totalTracks;
+  extern char trackQueue[30][96];
+  extern char currentAlbumAbsolutePath[256];
 
   // 1. Calculate Elapsed Time Metrics (176,400 bytes per second for CD Stereo)
   uint32_t totalElapsedSeconds = absoluteTrackBytesPlayed / 176400;
@@ -272,23 +275,37 @@ void handleLiveTimeAndProgressBar() {
   if (elapsedSecs != lastUpdatedSecond) {
     lastUpdatedSecond = elapsedSecs;
 
-    // Calculate Total Track Duration directly from the file size!
-    uint32_t totalTrackBytes = activeAudioFile.size() - 44;
+    // 🚀 THE ALIGNMENT CORE: Query file size maps using our active playback index
+    // completely ignoring whatever track file the look-ahead loader has targeted!
+    uint32_t totalTrackBytes = 0;
+    if (selectedArtistIndex >= 0 && selectedAlbumIndex >= 0 && activePlaybackTrackIndex < totalTracks) {
+      char fullTrackPath[384];
+      snprintf(fullTrackPath, sizeof(fullTrackPath), "%s/%s",
+               currentAlbumAbsolutePath, trackQueue[activePlaybackTrackIndex]);
+
+      File sizeCheckFile = SD.open(fullTrackPath);
+      if (sizeCheckFile) {
+        totalTrackBytes = sizeCheckFile.size() - 44;  // Total payload minus uncompressed header
+        sizeCheckFile.close();
+      }
+    }
+
+    // Protection fallback to prevent any malicious division by zero freezes
+    if (totalTrackBytes == 0) totalTrackBytes = 176400 * 180;  // 3-minute fallback
+
     uint32_t totalTrackSeconds = totalTrackBytes / 176400;
     uint32_t totalMins = totalTrackSeconds / 60;
     uint32_t totalSecs = totalTrackSeconds % 60;
 
-    // Synthesize the full composite readout as a single text block
+    // Synthesize the full composite readout string block container
     char timeBuffer[32];
     snprintf(timeBuffer, sizeof(timeBuffer), "%02u:%02u / %02u:%02u",
              (unsigned int)elapsedMins, (unsigned int)elapsedSecs,
              (unsigned int)totalMins, (unsigned int)totalSecs);
 
-    // 🚀 THE ALIGNMENT FIX:
-    // Start at X = 394 and restrict width to 71 to force the block to sit perfectly
-    // right-aligned, flush with the 465px edge of our progress bar boundary lines!
+    // Repaint text right-aligned flush with the 465px progress bar layout boundary margin
     int dummyTimeY = 0;
-    tft.fillRect(394, 216, 71, 10, COLOR_RAMS_BG);  // Wipe out old text row cleanly to prevent ghosting
+    tft.fillRect(394, 216, 71, 10, COLOR_RAMS_BG);  // Wipe row to completely block text ghosting
     drawWrappedTextLine(timeBuffer, 394, 216, 71, 1, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 0, 1, dummyTimeY);
 
     // =========================================================================
@@ -302,7 +319,7 @@ void handleLiveTimeAndProgressBar() {
       if (currentProgressPixelWidth != lastProgressPixelWidth) {
         lastProgressPixelWidth = currentProgressPixelWidth;
 
-        // Paint the hot active tracking line (Orange)
+        // Paint the hot active tracking slider line (Orange)
         tft.fillRect(pBarX, pBarY, currentProgressPixelWidth, pBarHeight, COLOR_RAMS_ORANGE);
 
         // Paint the remaining empty buffer tracking space (Divider Mute Color)
@@ -347,6 +364,7 @@ void drawTransportButton(UI_Button btn) {
     drawWrappedTextLine(btn.label, textX, textY, stringWidth + 2, 2, fg, bg, 0, 1, dummyNextY);
   }
 }
+
 bool readTouchPanel(uint16_t& x, uint16_t& y) {
   Wire.beginTransmission(FT6336U_ADDR);
   Wire.write(0x02);

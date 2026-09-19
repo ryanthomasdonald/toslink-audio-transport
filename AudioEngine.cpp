@@ -28,6 +28,10 @@ bool isMediaPlaying = false;
 bool isMediaPaused = false;
 bool activeEngineIsA = true;
 
+// 🚀 THE PLAYBACK SHIELD: Tracks what your headphones are ACTIVELY hearing,
+// completely isolating your UI text fields from background SD look-ahead loaders!
+int activePlaybackTrackIndex = 0;
+
 // Instantiate parallel queues to handle true synchronized Stereo!
 AudioPlayQueue queueLeft;
 AudioPlayQueue queueRight;
@@ -136,7 +140,8 @@ void playFreshAlbumStart() {
   activeRefillBank = 0;
   currentBankWriteProgressBytes = 0;
 
-  // 🚀 THE TIMING FIX: Reset absolute progress bytes cleanly for this fresh manual track selection
+  // Align active headphone playing index with your menu selection
+  activePlaybackTrackIndex = currentTrackIndex;
   absoluteTrackBytesPlayed = 0;
 
   isMediaPlaying = true;
@@ -185,6 +190,7 @@ void processBackgroundSDFill() {
 }
 
 // 🚀 THE MAIN OPERATIONAL LOOP PASSTHROUGH GATEWAY
+// 🚀 THE MAIN OPERATIONAL LOOP PASSTHROUGH GATEWAY
 void updateAudioEngine() {
   if (!isMediaPlaying) return;
 
@@ -194,7 +200,7 @@ void updateAudioEngine() {
     activeEngineState = ENGINE_IDLE;
     if (activeAudioFile) activeAudioFile.close();
     updatePlayPauseButtonLabel(">", COLOR_RAMS_CARD);
-    updateTrackWindow(currentTrackIndex + 1, "ALBUM FINISHED");
+    updateTrackWindow(activePlaybackTrackIndex + 1, "ALBUM FINISHED");
     Serial.println("AUDIO ENGINE: Full album stream completed cleanly.");
     return;
   }
@@ -207,8 +213,7 @@ void updateAudioEngine() {
     if (dmaBufferSlotL != NULL && dmaBufferSlotR != NULL) {
       uint32_t* stereoFrameSource = (uint32_t*)&circularAudioBuffer[ringReadPointer];
 
-      // 🚀 LITTLE-ENDIAN ALIGNMENT MATRIX:
-      // Low 16-bits hold the Left channel, High 16-bits hold Right!
+      // LITTLE-ENDIAN ALIGNMENT MATRIX:
       for (int i = 0; i < 128; i++) {
         uint32_t packedWord = stereoFrameSource[i];
         dmaBufferSlotL[i] = (int16_t)(packedWord & 0xFFFF);
@@ -218,13 +223,57 @@ void updateAudioEngine() {
       queueLeft.playBuffer();
       queueRight.playBuffer();
 
-      // 🚀 THE TIMING FIX: Accumulate progress bytes sequentially for this current active song!
+      // Accumulate progress bytes sequentially for this current active song!
       absoluteTrackBytesPlayed += 512;
 
+      // =========================================================================
+      // 🚀 AUTOMATED PLAYBACK AUTO-ADVANCE MONITOR
+      // We look at the actual byte length of the song currently playing in your headphones.
+      // The exact microsecond the accumulator crosses that size threshold, we know
+      // the song has finished playing, and we advance our playback trackers to match!
+      // =========================================================================
+      static uint32_t activeSongSizeBytes = 0;
+      static int lastCalculatedIndex = -1;
+
+      if (activePlaybackTrackIndex != lastCalculatedIndex) {
+        lastCalculatedIndex = activePlaybackTrackIndex;
+
+        // Open a quick, non-blocking handle to find the true size limit of this specific playing track
+        char trackPath[384];
+        snprintf(trackPath, sizeof(trackPath), "%s/%s", currentAlbumAbsolutePath, trackQueue[activePlaybackTrackIndex]);
+        File sizeFile = SD.open(trackPath);
+        if (sizeFile) {
+          activeSongSizeBytes = sizeFile.size() - 44;
+          sizeFile.close();
+        } else {
+          activeSongSizeBytes = 176400 * 180;  // 3-minute fallback
+        }
+      }
+
+      // If our playback accumulator matches or exceeds the actual size profile of the track,
+      // the headphones have cleanly exhausted the song bytes! Advance the audio tracker safely.
+      if (absoluteTrackBytesPlayed >= activeSongSizeBytes && activePlaybackTrackIndex < (totalTracks - 1)) {
+        activePlaybackTrackIndex++;
+        absoluteTrackBytesPlayed = 0;
+
+        extern void resetProgressTrackers();
+        resetProgressTrackers();
+
+        updateTrackWindow(activePlaybackTrackIndex + 1, trackQueue[activePlaybackTrackIndex]);
+        Serial.printf("🔊 HEADPHONE TRACKING SWAP: Shifted to Track %d over your headphones natively!\n", activePlaybackTrackIndex + 1);
+      }
+
+      // Maintain our separate static display string checker block
       static int lastTrackIndexTracked = -1;
-      if (currentTrackIndex != lastTrackIndexTracked) {
-        lastTrackIndexTracked = currentTrackIndex;
-        updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
+      if (activePlaybackTrackIndex != lastTrackIndexTracked) {
+        lastTrackIndexTracked = activePlaybackTrackIndex;
+
+        absoluteTrackBytesPlayed = 0;
+
+        extern void resetProgressTrackers();
+        resetProgressTrackers();
+
+        updateTrackWindow(activePlaybackTrackIndex + 1, trackQueue[activePlaybackTrackIndex]);
       }
 
       ringReadPointer = (ringReadPointer + 512) % TOTAL_BUFFER_SIZE;
