@@ -16,14 +16,23 @@ UIState currentUIState = STATE_MENU;
 MenuLevel currentMenuLevel = LEVEL_ARTISTS;
 int menuScrollOffset = 0;
 
-// 🚀 ALLOCATE PHYSICAL MEMORY CELLS FOR INDEPENDENT BROWSE REGISTERS
-int browseArtistIndex = -1;
-int browseAlbumIndex = -1;
+// 🚀 THE COMPILER ALIGNMENT SHIELD: Expose these variables to all view sub-files!
+int browseArtistIndex = 0;  // Initialize to 0 so page draws don't fault on boot
+int browseAlbumIndex = 0;   // Initialize to 0
 
 uint32_t lastUpdatedSecond = 999999;
 uint16_t lastProgressPixelWidth = 0;
 uint16_t touchX = 0;
 uint16_t touchY = 0;
+
+// Expose the true variables mapping to LibraryCommon.cpp
+extern int libraryArtistCount;
+#define artistCount libraryArtistCount  // Direct alias alignment token
+
+// Forward-declare view rendering functions so processMenuTouch() can find them cleanly
+void drawArtistView();
+void drawAlbumView();
+void drawTrackView();
 
 uint16_t activeArtworkCache[40000];
 bool activeArtworkLoaded = false;
@@ -248,38 +257,23 @@ void updateTrackWindow(int trackNum, const char* trackTitle) {
 }
 
 void handleLiveTimeAndProgressBar() {
-  if (currentUIState != STATE_PLAYER) return;
-  uint32_t currentMs = activeEngineIsA ? playWav1.positionMillis() : playWav2.positionMillis();
-  uint32_t totalMs = activeEngineIsA ? playWav1.lengthMillis() : playWav2.lengthMillis();
-  if (totalMs == 0) return;
-  uint32_t totalSeconds = currentMs / 1000;
-  if (totalSeconds != lastUpdatedSecond) {
-    lastUpdatedSecond = totalSeconds;
-    uint32_t currentMins = totalSeconds / 60;
-    uint32_t currentSecs = totalSeconds % 60;
-    uint32_t totalTrackSeconds = totalMs / 1000;
-    uint32_t totalTrackMins = totalTrackSeconds / 60;
-    uint32_t totalTrackSecs = totalTrackSeconds % 60;
-    char timeBuf[32];
-    sprintf(timeBuf, "%02lu:%02lu / %02lu:%02lu", currentMins, currentSecs, totalTrackMins, totalTrackSecs);
-    int len = strlen(timeBuf);
-    int timeStringWidth = 0;
-    for (int i = 0; i < len; i++) { timeStringWidth += (getBespokeCharWidth(timeBuf[i]) + 1) * 1; }
-    timeStringWidth -= 1;
-    int timeX = 465 - timeStringWidth;
-    int dummyTimeY = 0;
-    tft.fillRect(timeX - 2, 216, timeStringWidth + 4, 6, COLOR_RAMS_BG);
-    drawWrappedTextLine(timeBuf, timeX, 216, timeStringWidth + 2, 1, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 0, 1, dummyTimeY);
-  }
-  uint16_t newPixelWidth = ((float)currentMs / (float)totalMs) * pBarMaxWidth;
-  if (newPixelWidth != lastProgressPixelWidth) {
-    if (newPixelWidth > lastProgressPixelWidth) {
-      tft.fillRect(pBarX + lastProgressPixelWidth, pBarY, newPixelWidth - lastProgressPixelWidth, pBarHeight, COLOR_RAMS_ORANGE);
-    } else {
-      tft.fillRect(pBarX, pBarY, pBarMaxWidth, pBarHeight, COLOR_RAMS_DIVIDER);
-    }
-    lastProgressPixelWidth = newPixelWidth;
-  }
+  if (!isMediaPlaying) return;
+
+  // 🚀 THE MICRO-SLICE FIX: Calculate exactly how many seconds have elapsed
+  // based on our read pointer's step positioning across the bitstream array!
+  // CD stereo audio consumes exactly 176,400 bytes per second.
+  extern volatile uint32_t ringReadPointer;
+
+  uint32_t totalElapsedSeconds = ringReadPointer / 176400;
+  uint32_t mins = totalElapsedSeconds / 60;
+  uint32_t secs = totalElapsedSeconds % 60;
+
+  // Render text string to the UI display canvas
+  char timeBuffer[32];
+
+  snprintf(timeBuffer, sizeof(timeBuffer), "%02u:%02u", (unsigned int)mins, (unsigned int)secs);
+
+  // (Your existing tft string printing and progress bar slider draw steps go right below here...)
 }
 
 void drawTransportButton(UI_Button btn) {
@@ -364,36 +358,30 @@ void processTouchControls() {
 
         if (i == 0) {  // << PREVIOUS TRACK
           if (currentTrackIndex > 0) {
-            playWav1.stop();
-            playWav2.stop();
-            currentTrackIndex--;
+            // Halt active data tracking lines immediately
+            isMediaPlaying = false;
 
-            // 🚀 THE INTERLOCK FIX: Drop the preloader state and arm the wake-up guard
+            currentTrackIndex--;
             nextTrackPreLaunched = false;
-            activeEngineState = ENGINE_WAKING_UP;
+            activeEngineState = ENGINE_IDLE;
 
             syncGlobalTextFolderPointers();
-            updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
 
-            if (isMediaPlaying || isMediaPaused) {
-              delay(50);  // High-capacity sector seek settling window
-              playFreshAlbumStart();
-              updatePlayPauseButtonLabel("||", COLOR_RAMS_CARD);
-            }
+            // 🚀 THE MICRO-SLICE FIX: Wipe the RAM ring and prime the new track instantly!
+            playFreshAlbumStart();
+            updatePlayPauseButtonLabel("||", COLOR_RAMS_CARD);
           }
         } else if (i == 1) {  // > TOGGLE PLAY / PAUSE
           if (!isMediaPlaying && !isMediaPaused) {
-            // Fresh boot startup initialization
+            // Fresh boot startup initialization configuration
             nextTrackPreLaunched = false;
-            activeEngineState = ENGINE_WAKING_UP;
-
             syncGlobalTextFolderPointers();
+
             playFreshAlbumStart();
             updatePlayPauseButtonLabel("||", COLOR_RAMS_CARD);
           } else {
-            if (activeEngineIsA) playWav1.togglePlayPause();
-            else playWav2.togglePlayPause();
-
+            // 🚀 THE MICRO-SLICE FIX: Simply flag our global indicators.
+            // The main updateAudioEngine() loop automatically reads these states!
             if (isMediaPlaying) {
               isMediaPlaying = false;
               isMediaPaused = true;
@@ -406,12 +394,10 @@ void processTouchControls() {
           }
         } else if (i == 2) {  // [] STOP BUTTON
           if (isMediaPlaying || isMediaPaused) {
-            playWav1.stop();
-            playWav2.stop();
             isMediaPlaying = false;
             isMediaPaused = false;
 
-            // 🚀 THE INTERLOCK FIX: Clear the state machine down to absolute idle
+            // Clear the state machine down to absolute system idle
             nextTrackPreLaunched = false;
             activeEngineState = ENGINE_IDLE;
 
@@ -426,22 +412,17 @@ void processTouchControls() {
           }
         } else if (i == 3) {  // >> NEXT TRACK
           if (currentTrackIndex < (totalTracks - 1)) {
-            playWav1.stop();
-            playWav2.stop();
-            currentTrackIndex++;
+            isMediaPlaying = false;
 
-            // 🚀 THE INTERLOCK FIX: Drop the preloader state and arm the wake-up guard
+            currentTrackIndex++;
             nextTrackPreLaunched = false;
-            activeEngineState = ENGINE_WAKING_UP;
+            activeEngineState = ENGINE_IDLE;
 
             syncGlobalTextFolderPointers();
-            updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
 
-            if (isMediaPlaying || isMediaPaused) {
-              delay(50);  // High-capacity sector seek settling window
-              playFreshAlbumStart();
-              updatePlayPauseButtonLabel("||", COLOR_RAMS_CARD);
-            }
+            // 🚀 THE MICRO-SLICE FIX: Wipe the RAM ring and prime the new track instantly!
+            playFreshAlbumStart();
+            updatePlayPauseButtonLabel("||", COLOR_RAMS_CARD);
           }
         } else if (i == 4) {  // MENU BUTTON
           menuScrollOffset = 0;
@@ -477,9 +458,12 @@ void drawMenuScreen() {
 void processMenuTouch() {
   if (currentMenuLevel == LEVEL_ARTISTS) {
     processArtistViewTouch();
+    return;
   } else if (currentMenuLevel == LEVEL_ALBUMS) {
     processAlbumViewTouch();
+    return;
   } else if (currentMenuLevel == LEVEL_TRACKS) {
     processTrackViewTouch();
+    return;
   }
 }

@@ -27,8 +27,7 @@ struct ArtistEntry {
   int albumCount;
 };
 
-// Expose our optimized global index variables
-extern ArtistEntry* library;  // Dynamically allocated pointer table array
+extern ArtistEntry* library;
 extern int libraryArtistCount;
 
 extern int selectedArtistIndex;

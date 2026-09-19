@@ -93,19 +93,23 @@ void processTrackViewTouch() {
         int boxY = 45 + (i * 55);
         if (touchY >= boxY && touchY <= (boxY + 55)) {
 
-          playWav1.stop();
-          playWav2.stop();
+          isMediaPlaying = false;
+          isMediaPaused = false;
+
+          extern EngineLifecycleState activeEngineState;
+          activeEngineState = ENGINE_IDLE;
           delay(10);
 
-          // 🚀 THE COMMIT INTERLOCK PASS: True active track selection confirmed!
-          // Transfer our isolated browse coordinates over to your active playing variables.
+          // 🚀 THE COMMIT INTERLOCK: Lock browse registers into active playback metrics
           selectedArtistIndex = browseArtistIndex;
           selectedAlbumIndex = browseAlbumIndex;
           currentTrackIndex = itemIndex;
 
           populateTrackQueue();
 
-          String folderPath = "/" + String(library[selectedArtistIndex].name) + "/" + String(library[selectedArtistIndex].albums[selectedAlbumIndex].name) + "/";
+          // 🚀 THE ALIGNMENT SHIELD: Construct the path with NO trailing slash!
+          // This prevents double-slash path resolution failures inside SD.open()
+          String folderPath = "/" + String(library[selectedArtistIndex].name) + "/" + String(library[selectedArtistIndex].albums[selectedAlbumIndex].name);
           strncpy(currentAlbumAbsolutePath, folderPath.c_str(), sizeof(currentAlbumAbsolutePath) - 1);
           currentAlbumAbsolutePath[sizeof(currentAlbumAbsolutePath) - 1] = '\0';
 
@@ -113,12 +117,12 @@ void processTrackViewTouch() {
             snprintf(currentArtistFolder, sizeof(currentArtistFolder), "%s", library[selectedArtistIndex].name);
           }
 
-          // 🚀 THE META SYNC FIX: Correctly point the indexer to the nested album string array cell!
           if (library[selectedArtistIndex].albums[selectedAlbumIndex].name != NULL) {
             snprintf(currentAlbumFolder, sizeof(currentAlbumFolder), "%s", library[selectedArtistIndex].albums[selectedAlbumIndex].name);
           }
 
-          String artworkPath = folderPath + String(library[selectedArtistIndex].albums[selectedAlbumIndex].artworkFilename);
+          // Cache artwork with a cleanly injected separator
+          String artworkPath = folderPath + "/" + String(library[selectedArtistIndex].albums[selectedAlbumIndex].artworkFilename);
           cacheActiveAlbumArtwork(artworkPath);
 
           currentUIState = STATE_PLAYER;
@@ -126,6 +130,8 @@ void processTrackViewTouch() {
           updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
 
           delay(150);
+
+          // 🚀 ENGAGE UNIFIED BUFFER SYSTEM CYCLE: Clear RAM, strip headers, play music!
           playFreshAlbumStart();
           updatePlayPauseButtonLabel("||", COLOR_RAMS_CARD);
           break;

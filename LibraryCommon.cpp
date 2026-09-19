@@ -1,7 +1,8 @@
 #include "LibraryCommon.h"
 #include <SD.h>
 
-// Allocate our global indicators
+// 🚀 THE HYBRID DOUBLE-POINTER ENGINE:
+// Host our lean master lookup table root pointer inside the ultra-fast internal RAM block!
 ArtistEntry* library = NULL;
 int libraryArtistCount = 0;
 
@@ -16,24 +17,28 @@ extern char trackQueue[30][96];
 char currentAlbumAbsolutePath[256] = { 0 };
 
 void initLibrarySystem() {
-  // Dynamically allocate our core artist array table pool into the Heap
+  // Dynamically allocate our core artist array table pool into local internal RAM
   if (library == NULL) {
     library = (ArtistEntry*)malloc(sizeof(ArtistEntry) * MAX_ARTISTS);
     memset(library, 0, sizeof(ArtistEntry) * MAX_ARTISTS);
   }
 }
 
-// Helper tool to safely copy and heap-allocate character strings
+// 🚀 RETAIN EXTERNAL STRING STORAGE: Keep the filename strings on the external chips
+// so your internal heap capacity stays open and safe on the 512GB card!
 char* allocateString(const char* src) {
   if (src == NULL) return NULL;
-  char* dst = (char*)malloc(strlen(src) + 1);
+  char* dst = (char*)extmem_malloc(strlen(src) + 1);
   if (dst != NULL) {
     strcpy(dst, src);
+  } else {
+    Serial.println("❌ PSRAM ERROR: extmem_malloc out of bounds string memory space!");
   }
   return dst;
 }
 
 void buildLibraryIndex() {
+  // 1. Physically construct the lean root table pointer layout inside internal memory
   initLibrarySystem();
   libraryArtistCount = 0;
 
@@ -54,7 +59,7 @@ void buildLibraryIndex() {
       String upperFolderName = folderName;
       upperFolderName.toUpperCase();
 
-      // 🚀 THE FILTER FIX: Robust case-insensitive check safely strips out hidden system directories
+      // Robust case-insensitive check safely strips out hidden system directories
       if (upperFolderName == "SYSTEM VOLUME INFORMATION" || upperFolderName.startsWith(".")) {
         artistFolder.close();
         continue;
@@ -98,7 +103,7 @@ void buildLibraryIndex() {
                 if (!trackFile.isDirectory()) {
                   String fname = String(trackFile.name());
                   String upperFName = fname;
-                  upperFName.toUpperCase();  // 🚀 Fixed case variable typo
+                  upperFName.toUpperCase();
                   if (upperFName.endsWith(".WAV") && (fname[0] >= '0' && fname[0] <= '9')) {
                     if (currentAlbum->trackCount >= MAX_TRACKS_PER_ALBUM) {
                       trackFile.close();
@@ -126,14 +131,12 @@ void buildLibraryIndex() {
   root.close();
 
   // =========================================================================
-  // 🚀 TIER 1: THE ALPHABETICAL POINTER SORT ENGINE FOR ARTISTS (A-Z)
+  // 🚀 ALPHABETICAL POINTER SORT ENGINES (A-Z)
   // =========================================================================
   Serial.println("INDEXER: Alphabetizing memory pointer maps for Artists...");
   for (int i = 0; i < libraryArtistCount - 1; i++) {
     for (int j = i + 1; j < libraryArtistCount; j++) {
-      // Case-insensitive string comparison prevents sorting conflicts between folder casings
       if (strcasecmp(library[i].name, library[j].name) > 0) {
-        // Instantly swap the memory addresses of the artist blocks
         ArtistEntry temp = library[i];
         library[i] = library[j];
         library[j] = temp;
@@ -141,9 +144,6 @@ void buildLibraryIndex() {
     }
   }
 
-  // =========================================================================
-  // 🚀 TIER 2: THE ALPHABETICAL POINTER SORT ENGINE FOR ALBUMS (A-Z)
-  // =========================================================================
   Serial.println("INDEXER: Alphabetizing memory pointer maps for Albums...");
   for (int a = 0; a < libraryArtistCount; a++) {
     for (int i = 0; i < library[a].albumCount - 1; i++) {
@@ -157,9 +157,6 @@ void buildLibraryIndex() {
     }
   }
 
-  // =========================================================================
-  // 🚀 TIER 3: THE NUMERICAL / ALPHABETICAL SORT ENGINE FOR TRACKS (01-99)
-  // =========================================================================
   Serial.println("INDEXER: Alphabetizing memory pointer maps for Tracks...");
   for (int a = 0; a < libraryArtistCount; a++) {
     for (int b = 0; b < library[a].albumCount; b++) {
@@ -201,16 +198,10 @@ void populateTrackQueue() {
 
 void cacheActiveAlbumArtwork(String path) {
   activeArtworkLoaded = false;
-
-  // 1. Attempt a lightning-fast direct file open handle
   File bmpFile = SD.open(path.c_str());
 
-  // 🚀 THE CASE-INSENSITIVE FALLBACK SHIELD:
-  // If the 512GB card can't find the file due to a casing conflict (e.g. FOLDER.BMP vs folder.bmp)
   if (!bmpFile) {
     Serial.printf("ARTWORK DETOUR: Direct open failed for %s. Scanning folder case-insensitively...\n", path.c_str());
-
-    // Extract the parent directory path from the absolute path string
     int lastSlash = path.lastIndexOf('/');
     if (lastSlash != -1) {
       String dirPath = path.substring(0, lastSlash + 1);
@@ -218,18 +209,16 @@ void cacheActiveAlbumArtwork(String path) {
       if (dir) {
         while (true) {
           File entry = dir.openNextFile();
-          if (!entry) break;  // End of directory folder tree
-
+          if (!entry) break;
           if (!entry.isDirectory()) {
             String testName = String(entry.name());
             String upperTest = testName;
             upperTest.toUpperCase();
 
-            // If we catch a structural bitmap file asset match, grab its actual name string!
             if (upperTest == "FOLDER.BMP" || upperTest.endsWith(".BMP")) {
               String realPath = dirPath + testName;
               entry.close();
-              bmpFile = SD.open(realPath.c_str());  // Open using the exact casing on disk
+              bmpFile = SD.open(realPath.c_str());
               break;
             }
           }
@@ -240,21 +229,18 @@ void cacheActiveAlbumArtwork(String path) {
     }
   }
 
-  // Secondary safety protection check
   if (!bmpFile) {
     Serial.printf("ARTWORK CRITICAL ERROR: Image asset not found at path: %s\n", path.c_str());
     return;
   }
 
-  // Read the master pixel data offset directly out of bytes 10-13 of the header
   bmpFile.seek(10);
   uint32_t dataOffset = 0;
   bmpFile.read((uint8_t*)&dataOffset, 4);
 
-  int contentRowWidthBytes = 200 * 2;  // Exactly 400 bytes per line
+  int contentRowWidthBytes = 200 * 2;
   int fileStrideBytes = 400;
 
-  // Bottom-to-top loop keeps your artwork oriented right-side up
   for (int y = 0; y < 200; y++) {
     bmpFile.seek(dataOffset + ((uint32_t)y * fileStrideBytes));
     bmpFile.read((uint8_t*)&activeArtworkCache[(199 - y) * 200], contentRowWidthBytes);

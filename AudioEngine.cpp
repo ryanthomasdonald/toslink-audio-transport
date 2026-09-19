@@ -3,10 +3,18 @@
 #include "LibraryCommon.h"
 #include <SD.h>
 
+// 🚀 DIRECT LINK TO UNIFIED GLOBALS RESIDENT INSIDE THE MAIN .INO FILE
+extern volatile uint32_t ringWritePointer;
+extern volatile uint32_t ringReadPointer;
+extern volatile bool bankNeedRefill;
+extern volatile int activeRefillBank;
+
+extern EngineLifecycleState activeEngineState;
+extern bool nextTrackPreLaunched;
+
 // Standard paths retain their boundary tracking definitions
 char currentArtistFolder[PATH_BUFFER_SIZE] = "";
 char currentAlbumFolder[PATH_BUFFER_SIZE] = "";
-
 extern char currentAlbumAbsolutePath[256];
 
 // Instantiations matching our master header parameters exactly
@@ -16,42 +24,67 @@ int currentTrackIndex = 0;
 bool isMediaPlaying = false;
 bool isMediaPaused = false;
 bool activeEngineIsA = true;
-bool nextTrackPreLaunched = false;
 
-EngineLifecycleState activeEngineState = ENGINE_IDLE;
+// 🚀 Instantiate parallel queues to handle true synchronized Stereo!
+AudioPlayQueue queueLeft;
+AudioPlayQueue queueRight;
+AudioOutputSPDIF3 spdifOut;
 
-AudioPlaySdWav playWav1;
-AudioPlaySdWav playWav2;
-AudioMixer4 audioMixerL;
-AudioMixer4 audioMixerR;
-AudioOutputSPDIF3 spdif1;
+// Link separate queues directly to S/PDIF input slots 0 and 1
+AudioConnection patchCord1(queueLeft, 0, spdifOut, 0);
+AudioConnection patchCord2(queueRight, 0, spdifOut, 1);
 
-AudioConnection patchCord1(playWav1, 0, audioMixerL, 0);
-AudioConnection patchCord2(playWav2, 0, audioMixerL, 1);
-AudioConnection patchCord3(audioMixerL, 0, spdif1, 0);
-AudioConnection patchCord4(playWav1, 1, audioMixerR, 0);
-AudioConnection patchCord5(playWav2, 1, audioMixerR, 1);
-AudioConnection patchCord6(audioMixerR, 0, spdif1, 1);
+// 🚀 Allocate our massive 8MB Circular Ring Buffer directly into external PSRAM space
+#define BANK_SIZE_BYTES (1024 * 1024 * 4)
+#define TOTAL_BUFFER_SIZE (BANK_SIZE_BYTES * 2)
+EXTMEM char circularAudioBuffer[TOTAL_BUFFER_SIZE];
+
+// Micro-slice tracking milestones
+uint32_t currentBankWriteProgressBytes = 0;
+#define REFILL_SLICE_SIZE_BYTES 16384      // 16KB lightweight chunk limits
+const uint32_t audioDataStartOffset = 44;  // EAC standard uncompressed PCM offset
+
+File activeAudioFile;
 
 void initAudioSystem() {
-  AudioMemory(48);
-  audioMixerL.gain(0, 1.0);
-  audioMixerL.gain(1, 0.0);
-  audioMixerR.gain(0, 1.0);
-  audioMixerR.gain(1, 0.0);
+  AudioMemory(120);
+}
+
+// Helper function to dynamically open the next track from our RAM library pointer queue map
+bool advanceToNextPlaylistFile() {
+  if (activeAudioFile) activeAudioFile.close();
+
+  currentTrackIndex++;
+  if (currentTrackIndex >= totalTracks) {
+    Serial.println("🏁 AUDIO ENGINE: Reached final album track index boundary.");
+    return false;  // Album fully loaded into memory
+  }
+
+  // Dynamically reconstruct the absolute file path targeting the next indexed track asset
+  char fullTrackExecutionPath[384];
+  snprintf(fullTrackExecutionPath, sizeof(fullTrackExecutionPath), "%s/%s",
+           currentAlbumAbsolutePath, trackQueue[currentTrackIndex]);
+
+  activeAudioFile = SD.open(fullTrackExecutionPath);
+  if (!activeAudioFile) {
+    Serial.printf("❌ FILE ERROR: Failed to open path: %s\n", fullTrackExecutionPath);
+    return false;
+  }
+
+  activeAudioFile.seek(audioDataStartOffset);
+  Serial.printf("🔀 SEAMLESS HANDOFF: Opened next indexed track asset: %s\n", trackQueue[currentTrackIndex]);
+  return true;
 }
 
 void playFreshAlbumStart() {
-  playWav1.stop();
-  playWav2.stop();
-  delay(10);
+  if (activeAudioFile) activeAudioFile.close();
 
-  // Combine the absolute folder path with our solid pre-sorted RAM queue filename
+  // Reconstruct absolute pathing strings with correct path separators
   char fullTrackExecutionPath[384];
-  snprintf(fullTrackExecutionPath, sizeof(fullTrackExecutionPath), "%s%s",
+  snprintf(fullTrackExecutionPath, sizeof(fullTrackExecutionPath), "%s/%s",
            currentAlbumAbsolutePath, trackQueue[currentTrackIndex]);
 
-  Serial.printf("AUDIO ENGINE: Stream initialized targeting: %s\n", fullTrackExecutionPath);
+  Serial.printf("\n📥 AUDIO ENGINE: Initializing fresh manual launch pass for path: %s\n", fullTrackExecutionPath);
 
   // Synchronize text string caches for our display views
   if (selectedArtistIndex >= 0 && selectedAlbumIndex >= 0) {
@@ -63,124 +96,140 @@ void playFreshAlbumStart() {
     }
   }
 
-  AudioNoInterrupts();
-  if (activeEngineIsA) {
-    playWav1.play(fullTrackExecutionPath);
-  } else {
-    playWav2.play(fullTrackExecutionPath);
+  activeAudioFile = SD.open(fullTrackExecutionPath);
+  if (!activeAudioFile) {
+    Serial.println("❌ FILE ERROR: Cannot access target track path.");
+    return;
   }
-  AudioInterrupts();
+  activeAudioFile.seek(audioDataStartOffset);
+
+  // Completely prime the 8MB ring buffer immediately from the starting file
+  uint32_t totalBytesWritten = 0;
+  bool localPrimingFinished = false;
+
+  while (totalBytesWritten < TOTAL_BUFFER_SIZE && !localPrimingFinished) {
+    uint32_t spaceRemaining = TOTAL_BUFFER_SIZE - totalBytesWritten;
+    uint32_t safeReadSize = (spaceRemaining > 4096) ? 4096 : (spaceRemaining - (spaceRemaining % 4));
+    if (safeReadSize == 0) break;
+
+    int bytesRead = activeAudioFile.read((uint8_t*)&circularAudioBuffer[totalBytesWritten], safeReadSize);
+    if (bytesRead > 0) {
+      uint32_t alignedBytes = bytesRead - (bytesRead % 4);
+      totalBytesWritten += alignedBytes;
+      if (bytesRead != (int)alignedBytes) {
+        activeAudioFile.seek(activeAudioFile.position() - (bytesRead - alignedBytes));
+      }
+    } else {
+      if (!advanceToNextPlaylistFile()) {
+        localPrimingFinished = true;
+        break;
+      }
+    }
+  }
+
+  ringWritePointer = totalBytesWritten % TOTAL_BUFFER_SIZE;
+  ringReadPointer = 0;
+  bankNeedRefill = false;
+  activeRefillBank = 0;
+  currentBankWriteProgressBytes = 0;
 
   isMediaPlaying = true;
   isMediaPaused = false;
   nextTrackPreLaunched = false;
 
-  // 🚀 THE INTERLOCK PRIME: Arm the wake-up guard to ensure data edges settle safely
-  activeEngineState = ENGINE_WAKING_UP;
+  activeEngineState = ENGINE_ACTIVE_PLAYING;
+  updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
+  Serial.printf("AUDIO ENGINE: Priming complete. Cached %lu continuous bytes.\n", totalBytesWritten);
 }
 
-void preLoadNextTrack() {
-  int nextTrackIndex = currentTrackIndex + 1;
-  if (nextTrackIndex >= totalTracks) return;
+// 🚀 THE ASYNCHRONOUS MICRO-SLICE BACKGROUND LOADER
+void processBackgroundSDFill() {
+  if (!bankNeedRefill) return;
 
-  // Assemble the absolute folder track path for the preloaded audio stream
-  char fullTrackPreloadPath[384];
-  snprintf(fullTrackPreloadPath, sizeof(fullTrackPreloadPath), "%s%s",
-           currentAlbumAbsolutePath, trackQueue[nextTrackIndex]);
+  uint32_t bankStartOffset = activeRefillBank * BANK_SIZE_BYTES;
+  uint32_t sliceWriteAddress = bankStartOffset + currentBankWriteProgressBytes;
+  uint32_t bankSpaceRemaining = BANK_SIZE_BYTES - currentBankWriteProgressBytes;
 
-  Serial.printf("AUDIO ENGINE: Preloading next track from absolute path: %s\n", fullTrackPreloadPath);
+  uint32_t readTargetSize = (bankSpaceRemaining > REFILL_SLICE_SIZE_BYTES) ? REFILL_SLICE_SIZE_BYTES : bankSpaceRemaining;
 
-  // 🚀 STAGE PRELOAD PHASE
-  activeEngineState = ENGINE_PRELOADING;
+  int bytesRead = activeAudioFile.read((uint8_t*)&circularAudioBuffer[sliceWriteAddress], readTargetSize);
 
-  if (activeEngineIsA) {
-    if (playWav2.play(fullTrackPreloadPath)) {
-      delay(5);
-      playWav2.togglePlayPause();
+  if (bytesRead > 0) {
+    uint32_t alignedBytes = bytesRead - (bytesRead % 4);
+    currentBankWriteProgressBytes += alignedBytes;
+
+    if (bytesRead != (int)alignedBytes) {
+      activeAudioFile.seek(activeAudioFile.position() - (bytesRead - alignedBytes));
     }
   } else {
-    if (playWav1.play(fullTrackPreloadPath)) {
-      delay(5);
-      playWav1.togglePlayPause();
+    if (!advanceToNextPlaylistFile()) {
+      nextTrackPreLaunched = true;
+      bankNeedRefill = false;
+      return;
     }
+  }
+
+  if (currentBankWriteProgressBytes >= BANK_SIZE_BYTES) {
+    ringWritePointer = (bankStartOffset + currentBankWriteProgressBytes) % TOTAL_BUFFER_SIZE;
+    currentBankWriteProgressBytes = 0;
+    bankNeedRefill = false;
+    Serial.printf("AUDIO ENGINE: 4MB Bank %d packed via micro-slices. Active Track: %s\n",
+                  activeRefillBank, trackQueue[currentTrackIndex]);
   }
 }
 
+// 🚀 THE MAIN OPERATIONAL LOOP PASSTHROUGH GATEWAY
 void updateAudioEngine() {
   if (!isMediaPlaying) return;
-  int nextTrackIndex = currentTrackIndex + 1;
 
-  // =========================================================================
-  // 🚀 PHASE 1: STAGED HARDWARE DEBOUNCE MONITORING
-  // Protects the system against high-capacity 512GB SD cluster lookup lag
-  // =========================================================================
-  if (activeEngineState == ENGINE_WAKING_UP) {
-    // Look at the active hardware channel and wait until it is TRULY playing
-    bool hardwareConfirmedPlaying = activeEngineIsA ? playWav1.isPlaying() : playWav2.isPlaying();
-    if (hardwareConfirmedPlaying) {
-      activeEngineState = ENGINE_ACTIVE_PLAYING;
-      Serial.println("AUDIO ENGINE: Target channel confirmed active. Interlock released.");
-    }
-    return;  // Absolute lock: freeze checking track expirations until file opens
+  // Check if the album has fully completed playback down to the very final sample byte
+  if (nextTrackPreLaunched && ringReadPointer == ringWritePointer) {
+    isMediaPlaying = false;
+    activeEngineState = ENGINE_IDLE;
+    if (activeAudioFile) activeAudioFile.close();
+    updatePlayPauseButtonLabel(">", COLOR_RAMS_CARD);
+    updateTrackWindow(currentTrackIndex + 1, "ALBUM FINISHED");
+    Serial.println("AUDIO ENGINE: Full album stream completed cleanly.");
+    return;
   }
 
-  // Handle background preloading lifecycle stages cleanly
-  if (!nextTrackPreLaunched && nextTrackIndex < totalTracks) {
-    preLoadNextTrack();
-    nextTrackPreLaunched = true;
-  }
+  // Standard 128-sample stereo blocks require exactly 512 bytes of raw data.
+  if (queueLeft.available() && queueRight.available()) {
+    int16_t* dmaBufferSlotL = queueLeft.getBuffer();
+    int16_t* dmaBufferSlotR = queueRight.getBuffer();
 
-  // Catch when the preloaded track successfully caches into memory staging
-  if (activeEngineState == ENGINE_PRELOADING) {
-    bool nextChannelLoaded = activeEngineIsA ? playWav2.isPlaying() : playWav1.isPlaying();
-    // If the hardware reports false, it means togglePlayPause caught the file and paused it cleanly
-    if (!nextChannelLoaded) {
-      activeEngineState = ENGINE_STAGED;
-      Serial.println("AUDIO ENGINE: Next file staging sector cached cleanly in RAM.");
-    }
-  }
+    if (dmaBufferSlotL != NULL && dmaBufferSlotR != NULL) {
+      uint32_t* stereoFrameSource = (uint32_t*)&circularAudioBuffer[ringReadPointer];
 
-  // =========================================================================
-  // 🚀 PHASE 2: SAFE NATURAL CROSSOVER MONITORING
-  // =========================================================================
-  if (activeEngineState == ENGINE_STAGED || activeEngineState == ENGINE_ACTIVE_PLAYING) {
-    bool currentChannelFinished = activeEngineIsA ? !playWav1.isPlaying() : !playWav2.isPlaying();
+      // 🚀 THE VERIFIED LITTLE-ENDIAN ALIGNMENT MATRIX:
+      // Low 16-bits hold the Left channel, High 16-bits hold Right!
+      for (int i = 0; i < 128; i++) {
+        uint32_t packedWord = stereoFrameSource[i];
+        dmaBufferSlotL[i] = (int16_t)(packedWord & 0xFFFF);
+        dmaBufferSlotR[i] = (int16_t)(packedWord >> 16);
+      }
 
-    if (currentChannelFinished) {
-      if (nextTrackIndex < totalTracks) {
-        AudioNoInterrupts();
-        if (activeEngineIsA) {
-          audioMixerL.gain(0, 0.0);
-          audioMixerL.gain(1, 1.0);
-          audioMixerR.gain(0, 0.0);
-          audioMixerR.gain(1, 1.0);
-          playWav2.togglePlayPause();  // Wake up Engine B
-          activeEngineIsA = false;
-        } else {
-          audioMixerL.gain(0, 1.0);
-          audioMixerL.gain(1, 0.0);
-          audioMixerR.gain(0, 1.0);
-          audioMixerR.gain(1, 0.0);
-          playWav1.togglePlayPause();  // Wake up Engine A
-          activeEngineIsA = true;
-        }
-        AudioInterrupts();
+      queueLeft.playBuffer();
+      queueRight.playBuffer();
 
-        currentTrackIndex++;
-        nextTrackPreLaunched = false;
-
-        // 🚀 THE INTERLOCK SHIELD: Slam the state back to waking up!
-        // This completely prevents double skips during high-latency SD read frames.
-        activeEngineState = ENGINE_WAKING_UP;
-
+      static int lastTrackIndexTracked = -1;
+      if (currentTrackIndex != lastTrackIndexTracked) {
+        lastTrackIndexTracked = currentTrackIndex;
         updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
-        Serial.printf("AUDIO ENGINE: Crossover execution advanced to track %d\n", currentTrackIndex);
-      } else {
-        isMediaPlaying = false;
-        activeEngineState = ENGINE_IDLE;
-        updatePlayPauseButtonLabel(">", COLOR_RAMS_CARD);
-        updateTrackWindow(currentTrackIndex + 1, "ALBUM FINISHED");
+      }
+
+      ringReadPointer = (ringReadPointer + 512) % TOTAL_BUFFER_SIZE;
+
+      if (ringReadPointer == BANK_SIZE_BYTES && !bankNeedRefill) {
+        activeRefillBank = 0;
+        currentBankWriteProgressBytes = 0;
+        bankNeedRefill = true;
+      } else if (ringReadPointer == 0 && !bankNeedRefill) {
+        activeRefillBank = 1;
+        currentBankWriteProgressBytes = 0;
+        bankNeedRefill = true;
       }
     }
   }
+  processBackgroundSDFill();
 }

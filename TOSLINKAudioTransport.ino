@@ -8,26 +8,25 @@
 #define FT6336U_ADDR 0x38
 #define RESTART_TEENSY() *(volatile uint32_t *)0xE000ED0C = 0x5FA0004
 
+EngineLifecycleState activeEngineState = ENGINE_IDLE;
+bool nextTrackPreLaunched = false;
+int artistCount = 0;
+
+// 🚀 THE UNIFICATION RESIDENCY: Host the true structural audio tracking variables right here!
+volatile uint32_t ringWritePointer = 0;
+volatile uint32_t ringReadPointer = 0;
+volatile bool bankNeedRefill = false;
+volatile int activeRefillBank = 0;
+
+uint32_t lastTouchCheckTime = 0;
+uint32_t lastUICheckTime = 0;
+
 void setup() {
-  // =========================================================================
-  // 🚀 PHASE 1: MASSIVE SD HARDWARE POWER INTEGRITY WINDOW
-  // =========================================================================
-  // High-capacity 512GB SDXC cards contain internal microcontroller cores that
-  // consume substantial peak current spikes upon mounting. We extend the initial
-  // boot cushion to 1200ms to let your breadboard rails stabilize completely.
   delay(1200);
   Serial.begin(115200);
 
-  // =========================================================================
-  // 🚀 PHASE 2: STORAGE BUS PRIORITIZATION
-  // =========================================================================
-  // We initialize the high-speed 4-bit SDIO card interface FIRST. This isolates
-  // the heavy electrical inrush current of mounting the 512GB file system,
-  // ensuring the power rails are completely flat before the display bus wakes up.
   if (!(SD.begin(BUILTIN_SDCARD))) {
     Serial.println("CRITICAL: Built-in 512GB SD Card hardware initialization failed!");
-
-    // Safety Fallback: Attempt a basic display wake-up to report the mount error visually
     initDisplaySystem();
     tft.fillScreen(COLOR_RAMS_BG);
     tft.setCursor(20, 150);
@@ -37,65 +36,64 @@ void setup() {
   }
   Serial.println("SYSTEM: 512GB SD Card hardware initialized successfully.");
 
-  // =========================================================================
-  // 🚀 PHASE 3: SCREEN DISPLAY & AUDIO BUS SUB-SYSTEM ACTIVATION
-  // =========================================================================
-  initDisplaySystem();  // Starts display at 30MHz to defend against long jumper lines
-  initAudioSystem();    // Instantiates native digital audio output routing
+  initDisplaySystem();
+  initAudioSystem();
 
-  // Immediately draw the minimal loading screen with our polished 5x5 font engine
   drawBootLoadingScreen();
 
-  // =========================================================================
-  // 🚀 PHASE 4: DEFENSIVE TOUCH BUS HANDSHAKE INTERLOCK
-  // =========================================================================
   Serial.println("SYSTEM: Polling touch controller availability...");
   bool touchReady = false;
   uint32_t touchTimeoutStart = millis();
 
   while (!touchReady && (millis() - touchTimeoutStart < 2000)) {
     Wire.beginTransmission(FT6336U_ADDR);
-    // If the touch chip replies with a clean hardware ACK (0), the bus is safe
     if (Wire.endTransmission(true) == 0) {
       touchReady = true;
       Serial.println("SYSTEM: Touch panel acknowledged I2C bus cleanly.");
     }
-    delay(20);  // Minor timing delay loop to prevent voltage rail hammering
+    delay(20);
   }
 
-  if (!touchReady) {
-    Serial.println("WARNING: Touch panel initialization timed out! Operating blind.");
-  }
-
-  // 1. Run the heavy indexing scan that generates the electrical noise
   buildLibraryIndex();
 
-  // 🚀 ANTI-GARBAGE INTEGRITY SHIELD
   tft.fillScreen(COLOR_RAMS_BG);
   refreshDisplayHardwareState();
 
-  // 2. Clear state pointers and hand over control cleanly
   currentUIState = STATE_MENU;
   currentMenuLevel = LEVEL_ARTISTS;
   menuScrollOffset = 0;
 
-  // 🚀 THE CRITICAL INITIALIZATION FIX:
-  // Prime our sandbox variables to look at the first folder indices instead of -1!
-  // This guarantees that the layout loops find valid album counts on their first draw.
   extern int browseArtistIndex;
   extern int browseAlbumIndex;
   browseArtistIndex = 0;
   browseAlbumIndex = 0;
 
   drawMenuScreen();
+
+  lastTouchCheckTime = millis();
+  lastUICheckTime = millis();
 }
 
 void loop() {
-  processTouchControls();
+  // 🚀 TIER 1: CRITICAL AUDIO TRAFFIC PRIORITIZATION
+  // We execute the audio engine loops continuously at raw CPU speeds with NO delays.
   updateAudioEngine();
 
-  if (isMediaPlaying && currentUIState == STATE_PLAYER) {
-    handleLiveTimeAndProgressBar();
+  // 🚀 TIER 2: NON-BLOCKING TRANSPORT CONTROLS TIME-SLICE
+  // We poll the I2C touch panels only once every 15 milliseconds, completely
+  // preventing the touch bus overhead from stalling the audio registers!
+  uint32_t currentMillis = millis();
+  if (currentMillis - lastTouchCheckTime >= 15) {
+    lastTouchCheckTime = currentMillis;
+    processTouchControls();
   }
-  delay(2);
+
+  // 🚀 TIER 3: NON-BLOCKING DISPLAY GRAPHICS TIME-SLICE
+  // We paint the progress bars and time counters only once every 250 milliseconds.
+  if (isMediaPlaying && currentUIState == STATE_PLAYER) {
+    if (currentMillis - lastUICheckTime >= 250) {
+      lastUICheckTime = currentMillis;
+      handleLiveTimeAndProgressBar();
+    }
+  }
 }
