@@ -229,30 +229,49 @@ void drawWrappedTextLine(const char* text, int startX, int startY, int maxW, int
 void updateTrackWindow(int trackNum, const char* trackTitle) {
   if (currentUIState != STATE_PLAYER) return;
   resetProgressTrackers();
+
   String artistStr = String(currentArtistFolder);
   artistStr.replace("/", "");
   artistStr.toUpperCase();
+
   String albumStr = String(currentAlbumFolder);
   albumStr.replace("/", "");
   albumStr.toUpperCase();
-  tft.fillRect(235, 15, 230, 195, COLOR_RAMS_BG);
+
+  // Wipes the upper metadata area down completely
+  tft.fillRect(235, 15, 230, 213, COLOR_RAMS_BG);
+
   int trackingY = 18;
   int artistNextY = 0;
   drawWrappedTextLine(artistStr.c_str(), 235, trackingY, 230, 2, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 4, 2, artistNextY);
+
   trackingY = artistNextY + 8;
   int albumNextY = 0;
   drawWrappedTextLine(albumStr.c_str(), 235, trackingY, 230, 2, COLOR_RAMS_WHITE, COLOR_RAMS_BG, 4, 2, albumNextY);
+
   tft.drawFastHLine(235, 62, 230, COLOR_RAMS_ORANGE);
+
   String cleanName = String(trackTitle);
   if (cleanName.length() > 3) cleanName = cleanName.substring(3);
   if (cleanName.endsWith(".wav") || cleanName.endsWith(".WAV")) { cleanName = cleanName.substring(0, cleanName.length() - 4); }
   cleanName.toUpperCase();
+
   trackingY = 74;
   int titleNextY = 0;
-  drawWrappedTextLine(cleanName.c_str(), 235, trackingY, 230, 3, COLOR_RAMS_WHITE, COLOR_RAMS_BG, 6, 3, titleNextY);
+
+  // Wipe the track name canvas column bounding area to guarantee old fragments are zeroed out
+  tft.fillRect(235, trackingY, 230, 130, COLOR_RAMS_BG);
+
+  // 🚀 THE 6-LINE LAYOUT EXPANSION:
+  // Maximizing real estate by driving the lines parameter to 6.
+  // The layout wrapper will automatically place trailing dots (...) at the end of line 6!
+  drawWrappedTextLine(cleanName.c_str(), 235, trackingY, 230, 3, COLOR_RAMS_WHITE, COLOR_RAMS_BG, 6, 6, titleNextY);
+
   char countBuf[32];
   sprintf(countBuf, "TRACK %02d OF %02d", trackNum, totalTracks);
   int dummyCountY = 0;
+
+  // Paint the track index tally cleanly in its row
   drawWrappedTextLine(countBuf, 235, 216, 120, 1, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 0, 1, dummyCountY);
 }
 
