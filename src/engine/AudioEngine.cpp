@@ -30,7 +30,10 @@ bool activeEngineIsA = true;
 
 // 🚀 THE PLAYBACK SHIELD: Tracks what your headphones are ACTIVELY hearing,
 // completely isolating your UI text fields from background SD look-ahead loaders!
-int activePlaybackTrackIndex = 0;
+extern volatile bool uiTrackWindowNeedsRefresh;
+
+// 🚀 ENFORCE THE SHIELD: Tell this file the active index lives in the .ino file!
+extern int activePlaybackTrackIndex;
 
 // Instantiate parallel queues to handle true synchronized Stereo!
 AudioPlayQueue queueLeft;
@@ -190,7 +193,6 @@ void processBackgroundSDFill() {
 }
 
 // 🚀 THE MAIN OPERATIONAL LOOP PASSTHROUGH GATEWAY
-// 🚀 THE MAIN OPERATIONAL LOOP PASSTHROUGH GATEWAY
 void updateAudioEngine() {
   if (!isMediaPlaying) return;
 
@@ -226,19 +228,13 @@ void updateAudioEngine() {
       // Accumulate progress bytes sequentially for this current active song!
       absoluteTrackBytesPlayed += 512;
 
-      // =========================================================================
-      // 🚀 AUTOMATED PLAYBACK AUTO-ADVANCE MONITOR
-      // We look at the actual byte length of the song currently playing in your headphones.
-      // The exact microsecond the accumulator crosses that size threshold, we know
-      // the song has finished playing, and we advance our playback trackers to match!
-      // =========================================================================
+      // AUTOMATED PLAYBACK AUTO-ADVANCE MONITOR
       static uint32_t activeSongSizeBytes = 0;
       static int lastCalculatedIndex = -1;
 
       if (activePlaybackTrackIndex != lastCalculatedIndex) {
         lastCalculatedIndex = activePlaybackTrackIndex;
 
-        // Open a quick, non-blocking handle to find the true size limit of this specific playing track
         char trackPath[384];
         snprintf(trackPath, sizeof(trackPath), "%s/%s", currentAlbumAbsolutePath, trackQueue[activePlaybackTrackIndex]);
         File sizeFile = SD.open(trackPath);
@@ -246,48 +242,49 @@ void updateAudioEngine() {
           activeSongSizeBytes = sizeFile.size() - 44;
           sizeFile.close();
         } else {
-          activeSongSizeBytes = 176400 * 180;  // 3-minute fallback
+          activeSongSizeBytes = 176400 * 180;
         }
       }
 
-      // If our playback accumulator matches or exceeds the actual size profile of the track,
-      // the headphones have cleanly exhausted the song bytes! Advance the audio tracker safely.
+      // If our playback accumulator matches or exceeds the actual size profile of the track:
       if (absoluteTrackBytesPlayed >= activeSongSizeBytes && activePlaybackTrackIndex < (totalTracks - 1)) {
         activePlaybackTrackIndex++;
         absoluteTrackBytesPlayed = 0;
 
-        extern void resetProgressTrackers();
-        resetProgressTrackers();
+        // 🚀 THE INSULATION FIX: Do NOT draw text here! Just flag it and keep streaming samples!
+        extern volatile bool uiTrackWindowNeedsRefresh;
+        uiTrackWindowNeedsRefresh = true;
 
-        updateTrackWindow(activePlaybackTrackIndex + 1, trackQueue[activePlaybackTrackIndex]);
-        Serial.printf("🔊 HEADPHONE TRACKING SWAP: Shifted to Track %d over your headphones natively!\n", activePlaybackTrackIndex + 1);
+        Serial.printf("🔊 AUDIO TRANSITION: Advanced tracking index to %d. Flagged UI thread.\n", activePlaybackTrackIndex + 1);
       }
 
-      // Maintain our separate static display string checker block
+      // Maintain our separate static display string checker block for manual launches
       static int lastTrackIndexTracked = -1;
       if (activePlaybackTrackIndex != lastTrackIndexTracked) {
         lastTrackIndexTracked = activePlaybackTrackIndex;
-
         absoluteTrackBytesPlayed = 0;
 
-        extern void resetProgressTrackers();
-        resetProgressTrackers();
-
-        updateTrackWindow(activePlaybackTrackIndex + 1, trackQueue[activePlaybackTrackIndex]);
+        extern volatile bool uiTrackWindowNeedsRefresh;
+        uiTrackWindowNeedsRefresh = true;
       }
 
       ringReadPointer = (ringReadPointer + 512) % TOTAL_BUFFER_SIZE;
 
-      if (ringReadPointer == BANK_SIZE_BYTES && !bankNeedRefill) {
+      // 🚀 THE DEFENSIVE SECURITY SHIELD:
+      // Changed exact equality checks (==) to boundary window gates (>=) to completely
+      // protect the rolling buffer from ever missing a background refill trigger!
+      if (ringReadPointer >= BANK_SIZE_BYTES && ringReadPointer < (BANK_SIZE_BYTES + 512) && !bankNeedRefill) {
         activeRefillBank = 0;
         currentBankWriteProgressBytes = 0;
         bankNeedRefill = true;
-      } else if (ringReadPointer == 0 && !bankNeedRefill) {
+      } else if (ringReadPointer < 512 && ringReadPointer >= 0 && !bankNeedRefill) {
         activeRefillBank = 1;
         currentBankWriteProgressBytes = 0;
         bankNeedRefill = true;
       }
     }
   }
-  processBackgroundSDFill();
+  if (isMediaPlaying && !isMediaPaused) {
+    processBackgroundSDFill();
+  }
 }

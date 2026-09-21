@@ -11,6 +11,10 @@
 EngineLifecycleState activeEngineState = ENGINE_IDLE;
 bool nextTrackPreLaunched = false;
 int artistCount = 0;
+volatile bool uiTrackWindowNeedsRefresh = false;
+
+// 🚀 THE LINKER FIX: Physically allocate the master playing index tracking cell!
+int activePlaybackTrackIndex = 0;
 
 // 🚀 THE UNIFICATION RESIDENCY: Host the true structural audio tracking variables right here!
 volatile uint32_t ringWritePointer = 0;
@@ -75,21 +79,29 @@ void setup() {
 }
 
 void loop() {
-  // 🚀 TIER 1: CRITICAL AUDIO TRAFFIC PRIORITIZATION
-  // We execute the audio engine loops continuously at raw CPU speeds with NO delays.
+  // 🚀 TIER 1: EXECUTE THE AUDIO PIPELINE CONTINUOUSLY AT MAXIMUM VELOCITY
   updateAudioEngine();
 
-  // 🚀 TIER 2: NON-BLOCKING TRANSPORT CONTROLS TIME-SLICE
-  // We poll the I2C touch panels only once every 15 milliseconds, completely
-  // preventing the touch bus overhead from stalling the audio registers!
+  // 🚀 THE INSULATION SHIELD: If a track handoff just happened in the background,
+  // paint the new 6-line text rows here outside of the sample extraction loop!
+  if (uiTrackWindowNeedsRefresh && currentUIState == STATE_PLAYER) {
+    uiTrackWindowNeedsRefresh = false;  // Clear the flag instantly
+
+    void resetProgressTrackers();
+    extern int activePlaybackTrackIndex;
+
+    resetProgressTrackers();
+    updateTrackWindow(activePlaybackTrackIndex + 1, trackQueue[activePlaybackTrackIndex]);
+  }
+
+  // TIER 2: NON-BLOCKING TRANSPORT CONTROLS TIME-SLICE
   uint32_t currentMillis = millis();
   if (currentMillis - lastTouchCheckTime >= 15) {
     lastTouchCheckTime = currentMillis;
     processTouchControls();
   }
 
-  // 🚀 TIER 3: NON-BLOCKING DISPLAY GRAPHICS TIME-SLICE
-  // We paint the progress bars and time counters only once every 250 milliseconds.
+  // TIER 3: NON-BLOCKING DISPLAY GRAPHICS TIME-SLICE
   if (isMediaPlaying && currentUIState == STATE_PLAYER) {
     if (currentMillis - lastUICheckTime >= 250) {
       lastUICheckTime = currentMillis;
