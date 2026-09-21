@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <Audio.h>
 #include <SD.h>
-#include "DisplayUI.h"  // Ensures EngineLifecycleState enum is visible globally
+#include "../../src/ui/main/DisplayUI.h"  // Ensures EngineLifecycleState enum is visible globally
 
 // Global Audio Configuration Footprints
 #define PATH_BUFFER_SIZE 256

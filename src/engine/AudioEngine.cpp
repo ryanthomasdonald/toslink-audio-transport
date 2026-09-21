@@ -1,6 +1,6 @@
 #include "AudioEngine.h"
-#include "DisplayUI.h"
-#include "LibraryCommon.h"
+#include "../../src/ui/main/DisplayUI.h"
+#include "../../src/ui/menu/LibraryCommon.h"
 #include <SD.h>
 
 // 🚀 DIRECT LINK TO UNIFIED GLOBALS RESIDENT INSIDE THE MAIN .INO FILE

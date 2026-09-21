@@ -1,9 +1,9 @@
 #include <SPI.h>
 #include <SD.h>
 #include <Wire.h>
-#include "AudioEngine.h"
-#include "DisplayUI.h"
-#include "LibraryCommon.h"
+#include "src/engine/AudioEngine.h"
+#include "src/ui/main/DisplayUI.h"
+#include "src/ui/menu/LibraryCommon.h"
 
 #define FT6336U_ADDR 0x38
 #define RESTART_TEENSY() *(volatile uint32_t *)0xE000ED0C = 0x5FA0004

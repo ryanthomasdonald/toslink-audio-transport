@@ -2,7 +2,7 @@
 #define LIBRARY_COMMON_H
 
 #include <Arduino.h>
-#include "DisplayUI.h"
+#include "../main/DisplayUI.h"
 
 #define MAX_TRACKS_PER_ALBUM 30
 #define MAX_ALBUMS_PER_ARTIST 20

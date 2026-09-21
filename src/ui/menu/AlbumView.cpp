@@ -1,6 +1,6 @@
 #include "LibraryCommon.h"
-#include "DisplayUI.h"
-#include "AudioEngine.h"
+#include "../main/DisplayUI.h"
+#include "../../../src/engine/AudioEngine.h"
 
 // 🚀 EXPLICIT LAYER EXPOSURE
 extern int browseArtistIndex;

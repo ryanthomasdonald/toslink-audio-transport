@@ -1,7 +1,7 @@
 #include "DisplayUI.h"
-#include "AudioEngine.h"
-#include "LibraryCommon.h"
-#include "BespokeFont.h"
+#include "../../../src/engine/AudioEngine.h"
+#include "../menu/LibraryCommon.h"
+#include "../util/BespokeFont.h"
 #include <Wire.h>
 #include <SD.h>
 
