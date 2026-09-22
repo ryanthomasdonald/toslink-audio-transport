@@ -14,6 +14,7 @@ extern bool nextTrackPreLaunched;
 
 // 🚀 THE TIMING FIX ACCUMULATOR: Tracks true absolute bytes sent for the current track
 volatile uint32_t absoluteTrackBytesPlayed = 0;
+int lastTrackIndexTracked = -1; 
 
 // Standard paths retain their boundary tracking definitions
 char currentArtistFolder[PATH_BUFFER_SIZE] = "";
@@ -152,7 +153,7 @@ void playFreshAlbumStart() {
   nextTrackPreLaunched = false;
 
   activeEngineState = ENGINE_ACTIVE_PLAYING;
-  updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
+  // updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
   Serial.printf("AUDIO ENGINE: Priming complete. Cached %lu continuous bytes.\n", totalBytesWritten);
 }
 
@@ -259,7 +260,6 @@ void updateAudioEngine() {
       }
 
       // Maintain our separate static display string checker block for manual launches
-      static int lastTrackIndexTracked = -1;
       if (activePlaybackTrackIndex != lastTrackIndexTracked) {
         lastTrackIndexTracked = activePlaybackTrackIndex;
         absoluteTrackBytesPlayed = 0;

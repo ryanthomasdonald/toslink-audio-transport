@@ -78,8 +78,19 @@ void drawBootLoadingScreen() {
 }
 
 void resetProgressTrackers() {
-  lastUpdatedSecond = 999999;
-  lastProgressPixelWidth = 0;
+  // 🚀 THE TIMING INSULATION FIX:
+  // If the engine is completely stopped/idle, lock the trackers to 0 state!
+  // This keeps handleLiveTimeAndProgressBar() from false-triggering an
+  // immediate duplicate drawing pass right after updateTrackWindow finishes.
+  if (!isMediaPlaying && !isMediaPaused) {
+    lastUpdatedSecond = 0;
+    lastProgressPixelWidth = 0;
+  } else {
+    // Standard initialization offset token for active playing tracks
+    lastUpdatedSecond = 999999;
+    lastProgressPixelWidth = 0;
+  }
+
   if (currentUIState == STATE_PLAYER) {
     tft.fillRect(pBarX, pBarY, pBarMaxWidth, pBarHeight, COLOR_RAMS_DIVIDER);
   }
@@ -262,9 +273,7 @@ void updateTrackWindow(int trackNum, const char* trackTitle) {
   // Wipe the track name canvas column bounding area to guarantee old fragments are zeroed out
   tft.fillRect(235, trackingY, 230, 130, COLOR_RAMS_BG);
 
-  // 🚀 THE 6-LINE LAYOUT EXPANSION:
-  // Maximizing real estate by driving the lines parameter to 6.
-  // The layout wrapper will automatically place trailing dots (...) at the end of line 6!
+  // Maximizing real estate by driving the lines parameter to 6 rows deep
   drawWrappedTextLine(cleanName.c_str(), 235, trackingY, 230, 3, COLOR_RAMS_WHITE, COLOR_RAMS_BG, 6, 6, titleNextY);
 
   char countBuf[32];
@@ -273,6 +282,16 @@ void updateTrackWindow(int trackNum, const char* trackTitle) {
 
   // Paint the track index tally cleanly in its row
   drawWrappedTextLine(countBuf, 235, 216, 120, 1, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 0, 1, dummyCountY);
+
+  // 🚀 THE VISUAL ALIGNMENT INTEGRATION:
+  // If the engine is completely idle/stopped, paint the static timeline clock
+  // right here as an integrated part of this single-pass drawing sweep!
+  // This restores your missing counter and ensures it draws exactly ONCE.
+  if (!isMediaPlaying && !isMediaPaused) {
+    int dummyTimeY = 0;
+    tft.fillRect(394, 216, 71, 10, COLOR_RAMS_BG);
+    drawWrappedTextLine("00:00 / 00:00", 394, 216, 71, 1, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 0, 1, dummyTimeY);
+  }
 }
 
 void handleLiveTimeAndProgressBar() {
@@ -428,19 +447,20 @@ void processTouchControls() {
         // Expose our new global enum state tracker to the button actions scope
         extern EngineLifecycleState activeEngineState;
         extern bool nextTrackPreLaunched;
+        extern int activePlaybackTrackIndex;
 
         if (i == 0) {  // << PREVIOUS TRACK
-          if (currentTrackIndex > 0) {
-            // Halt active data tracking lines immediately
+          if (activePlaybackTrackIndex > 0) {
             isMediaPlaying = false;
 
+            // 🚀 THE SHIELD FIX: Simply shift indices and exit! Let the thread paint it once.
             currentTrackIndex--;
+            activePlaybackTrackIndex = currentTrackIndex;
+
             nextTrackPreLaunched = false;
             activeEngineState = ENGINE_IDLE;
 
             syncGlobalTextFolderPointers();
-
-            // 🚀 THE MICRO-SLICE FIX: Wipe the RAM ring and prime the new track instantly!
             playFreshAlbumStart();
             updatePlayPauseButtonLabel("||", COLOR_RAMS_CARD);
           }
@@ -467,33 +487,40 @@ void processTouchControls() {
           }
         } else if (i == 2) {  // [] STOP BUTTON
           if (isMediaPlaying || isMediaPaused) {
+            // 🚀 THE SHIELD FIX: Shift state indicators cleanly and exit. Zero local drawing!
             isMediaPlaying = false;
             isMediaPaused = false;
-
-            // Clear the state machine down to absolute system idle
             nextTrackPreLaunched = false;
             activeEngineState = ENGINE_IDLE;
 
             updatePlayPauseButtonLabel(">", COLOR_RAMS_CARD);
-
-            int dummyTimeY = 0;
-            tft.fillRect(400, 216, 80, 6, COLOR_RAMS_BG);
-            drawWrappedTextLine("00:00 / 00:00", 400, 216, 80, 1, COLOR_RAMS_TEXT_MUTE, COLOR_RAMS_BG, 0, 1, dummyTimeY);
-
             syncGlobalTextFolderPointers();
-            updateTrackWindow(currentTrackIndex + 1, trackQueue[currentTrackIndex]);
+
+            // Proactively resync the background trackers
+            extern int lastTrackIndexTracked;
+            lastTrackIndexTracked = activePlaybackTrackIndex;
+
+            extern uint32_t lastUpdatedSecond;
+            extern uint16_t lastProgressPixelWidth;
+            lastUpdatedSecond = 0;
+            lastProgressPixelWidth = 0;
+
+            // Flag the master UI thread loop to paint the screen exactly once cleanly
+            extern volatile bool uiTrackWindowNeedsRefresh;
+            uiTrackWindowNeedsRefresh = true;
           }
         } else if (i == 3) {  // >> NEXT TRACK
-          if (currentTrackIndex < (totalTracks - 1)) {
+          if (activePlaybackTrackIndex < (totalTracks - 1)) {
             isMediaPlaying = false;
 
+            // 🚀 THE SHIELD FIX: Simply shift indices and exit!
             currentTrackIndex++;
+            activePlaybackTrackIndex = currentTrackIndex;
+
             nextTrackPreLaunched = false;
             activeEngineState = ENGINE_IDLE;
 
             syncGlobalTextFolderPointers();
-
-            // 🚀 THE MICRO-SLICE FIX: Wipe the RAM ring and prime the new track instantly!
             playFreshAlbumStart();
             updatePlayPauseButtonLabel("||", COLOR_RAMS_CARD);
           }
